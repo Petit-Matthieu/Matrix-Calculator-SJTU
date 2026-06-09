@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C语言矩阵库网页端实现 · 分块微内核乘法优化</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@300;400;500;600&family=Noto+Sans+SC:wght@200;300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#fafaf8;
+    --paper-rgb:250,250,248;
+    --ink:#0a0a0a;
+    --ink-rgb:10,10,10;
+    --grey-1:#f0f0ee;
+    --grey-2:#d4d4d2;
+    --grey-3:#737373;
+    --accent:#002FA7;
+    --accent-rgb:0,47,167;
+    --accent-on:#ffffff;
+    --accent-bright:#5B7BFF;
+
+    --text-primary:#0a0a0a;
+    --text-secondary:#525252;
+    --text-helper:#737373;
+    --text-placeholder:#a3a3a3;
+    --text-on-color:#ffffff;
+    --border-subtle:#e0e0e0;
+    --border-strong:#a3a3a3;
+
+    --sans:"Inter","Helvetica Neue","Helvetica","Arial","Segoe UI Variable","Segoe UI",system-ui,-apple-system,sans-serif;
+    --sans-zh:"PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei","微软雅黑",sans-serif;
+    --mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Cascadia Code","Consolas","Courier New",ui-monospace,monospace;
+
+    --sp-3:8px;--sp-4:12px;--sp-5:16px;--sp-6:24px;--sp-7:32px;
+    --sp-8:40px;--sp-9:48px;--sp-10:64px;--sp-11:80px;--sp-12:96px;--sp-13:160px;
+
+    --ease-prod:cubic-bezier(.2,0,.38,.9);
+    --ease-exp:cubic-bezier(.4,.14,.3,1);
+    --ease-entry-prod:cubic-bezier(0,0,.38,.9);
+    --ease-entry-exp:cubic-bezier(0,0,.3,1);
+    --dur-fast-1:.07s;--dur-fast-2:.11s;--dur-mod-1:.15s;--dur-mod-2:.24s;
+    --dur-slow-1:.4s;--dur-slow-2:.7s;
+
+    --nav-safe-bottom:8vh;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    width:100%;height:100%;overflow:hidden;
+    background:var(--paper);color:var(--ink);
+    font-family:var(--sans),var(--sans-zh);
+    font-feature-settings:"ss01","cv11";
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility
+  }
+
+  canvas.bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:block;opacity:.55;mix-blend-mode:multiply;pointer-events:none}
+  body.dark-bg canvas.bg{mix-blend-mode:screen;opacity:.42}
+  body.low-power canvas.bg,
+  body.low-power canvas.ascii-bg{display:none!important}
+
+  #deck{position:fixed;inset:0;width:10000vw;height:100vh;display:flex;flex-wrap:nowrap;transition:transform .9s cubic-bezier(.77,0,.175,1);z-index:10;will-change:transform}
+  .slide{
+    width:100vw;height:100vh;flex:0 0 100vw;
+    position:relative;
+    padding:5.5vh 5vw 7vh 5vw;
+    display:flex;flex-direction:column;
+    overflow:hidden;
+    background:var(--paper);color:var(--ink);
+  }
+  .slide.grey{background:var(--grey-1)}
+  .slide.dark{background:var(--ink);color:var(--paper)}
+  .slide.dark .grey-only{display:none}
+  .slide.accent{background:var(--accent);color:var(--accent-on)}
+  .slide.accent .accent-block{background:var(--accent-on);color:var(--accent)}
+
+  .slide.hero{background:transparent}
+  .slide.hero.grey{background:rgba(var(--paper-rgb),.86);backdrop-filter:blur(1px)}
+  .slide.hero.dark{background:rgba(var(--ink-rgb),.92);color:var(--paper)}
+
+  .rule{width:100%;height:1px;background:currentColor;opacity:.18;margin:0}
+  .rule.thick{height:2px;opacity:.85}
+  .rule.accent{background:var(--accent);opacity:1;height:2px}
+  .rule.v{width:1px;height:100%;margin:0}
+
+  .dots{
+    background-image:radial-gradient(currentColor 1px, transparent 1px);
+    background-size:12px 12px;background-position:0 0;opacity:.18;
+  }
+  .dots-fine{
+    background-image:radial-gradient(currentColor 0.8px, transparent 0.8px);
+    background-size:8px 8px;opacity:.14;
+  }
+
+  .chrome{
+    display:flex;justify-content:space-between;align-items:flex-start;
+    font-family:var(--mono);font-size:14px;letter-spacing:.16em;text-transform:uppercase;
+    opacity:.7;margin-bottom:auto
+  }
+  .chrome .l,.chrome .r{display:flex;gap:1.6em;align-items:center}
+
+  .foot{
+    margin-top:auto;
+    display:flex;justify-content:space-between;align-items:flex-end;
+    font-family:var(--mono);font-size:14px;letter-spacing:.14em;text-transform:uppercase;
+    opacity:.55;padding-top:2vh;
+    border-top:1px solid currentColor;border-color:rgba(127,127,127,.25)
+  }
+
+  .kicker{
+    font-family:var(--mono);font-size:14px;letter-spacing:.24em;text-transform:uppercase;
+    opacity:.65;margin-bottom:2.4vh;display:inline-flex;align-items:center;gap:.8em
+  }
+  .kicker::before{content:"";width:24px;height:1px;background:currentColor;opacity:.6}
+  .kicker.accent{color:var(--accent);opacity:1;font-weight:600}
+
+  .h-hero{
+    font-family:var(--sans),var(--sans-zh);font-weight:200;
+    font-size:11vw;line-height:.92;letter-spacing:-.04em;
+  }
+  .h-hero-zh{
+    font-family:var(--sans),var(--sans-zh);font-weight:200;
+    font-size:8.4vw;line-height:.96;letter-spacing:-.025em;
+  }
+  .h-xl{
+    font-family:var(--sans),var(--sans-zh);font-weight:200;
+    font-size:6vw;line-height:1;letter-spacing:-.03em;
+  }
+  .h-xl-zh{
+    font-family:var(--sans),var(--sans-zh);font-weight:200;
+    font-size:5vw;line-height:1.05;letter-spacing:-.025em;
+  }
+  .h-md{
+    font-family:var(--sans),var(--sans-zh);font-weight:300;
+    font-size:2.6vw;line-height:1.18;letter-spacing:-.015em;
+  }
+
+  .lead{
+    font-family:var(--sans),var(--sans-zh);font-weight:400;
+    font-size:1.55vw;line-height:1.4;letter-spacing:-.005em;opacity:.86;
+  }
+  .body{
+    font-family:var(--sans),var(--sans-zh);font-weight:400;
+    font-size:max(18px,1.08vw);line-height:1.6;letter-spacing:0;opacity:.78;
+  }
+  .body-sm{
+    font-family:var(--sans),var(--sans-zh);font-weight:400;
+    font-size:max(16px,.92vw);line-height:1.55;opacity:.7;
+  }
+  .meta{
+    font-family:var(--mono);font-size:max(14px,.82vw);
+    letter-spacing:.18em;text-transform:uppercase;opacity:.6;
+  }
+
+  .kpi-hero{
+    font-family:var(--sans);font-weight:800;
+    font-size:22vw;line-height:.82;letter-spacing:-.05em;
+    font-feature-settings:"tnum","ss01";
+  }
+  .kpi-hero .unit{
+    font-family:var(--sans),var(--sans-zh);font-weight:500;
+    font-size:.18em;letter-spacing:0;opacity:.5;margin-left:.12em;vertical-align:.5em;
+  }
+  .kpi-hero.accent{color:var(--accent)}
+
+  .stat-card{
+    display:flex;flex-direction:column;gap:.6vh;align-items:flex-start;
+    padding-top:1.6vh;border-top:2px solid currentColor;
+  }
+  .stat-card.accent-top{border-top-color:var(--accent);border-top-width:3px}
+  .stat-card .stat-label{
+    font-family:var(--mono);font-size:max(14px,.82vw);
+    letter-spacing:.24em;text-transform:uppercase;opacity:.6;
+  }
+  .stat-card .stat-nb{
+    font-family:var(--sans);font-weight:800;
+    font-size:5.6vw;line-height:.88;letter-spacing:-.035em;
+    font-feature-settings:"tnum";margin-top:.4vh;
+  }
+  .stat-card .stat-nb .stat-unit{
+    font-family:var(--sans),var(--sans-zh);font-weight:500;
+    font-size:.32em;letter-spacing:0;opacity:.6;margin-left:.14em;vertical-align:.4em;
+  }
+  .stat-card .stat-note{
+    font-family:var(--sans),var(--sans-zh);font-weight:400;
+    font-size:max(16px,.98vw);line-height:1.5;opacity:.7;margin-top:.6vh;
+  }
+  .grid-4 .stat-card .stat-nb{font-size:4.6vw}
+
+  .accent-block{
+    background:var(--accent);color:var(--accent-on);padding:2.4vh 2vw;
+  }
+  .ink-block{background:var(--ink);color:var(--paper);padding:2.4vh 2vw}
+  .grey-block{background:var(--grey-1);padding:2.4vh 2vw}
+
+  .mark{
+    background:var(--accent);color:var(--accent-on);
+    padding:0 .2em;box-decoration-break:clone;-webkit-box-decoration-break:clone;
+  }
+
+  .pipeline-section{margin-top:3.2vh;padding-top:2.2vh;border-top:1px solid rgba(127,127,127,.3)}
+  .pipeline-section:first-of-type{border-top:0;padding-top:0;margin-top:2.4vh}
+  .pipeline{
+    display:grid;grid-template-columns:repeat(5,1fr);gap:1vw;
+  }
+  .pipeline[data-cols="4"]{grid-template-columns:repeat(4,1fr)}
+  .pipeline[data-cols="3"]{grid-template-columns:repeat(3,1fr)}
+  .step{
+    display:flex;flex-direction:column;gap:.6vh;
+    padding-top:1.2vh;border-top:2px solid currentColor;
+  }
+  .step.accent-top{border-top-color:var(--accent);border-top-width:3px}
+  .step-nb{font-family:var(--mono);font-weight:500;font-size:max(14px,1vw);opacity:.5;letter-spacing:.04em}
+  .step-title{font-family:var(--sans),var(--sans-zh);font-weight:700;font-size:1.4vw;letter-spacing:-.01em;line-height:1.2}
+  .step-desc{font-family:var(--sans),var(--sans-zh);font-weight:400;font-size:max(16px,.94vw);line-height:1.45;opacity:.7}
+
+  .frame{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .grid-12{display:grid;grid-template-columns:repeat(12,1fr);gap:2vh 1.2vw;align-items:start}
+  .span-2{grid-column:span 2}.span-3{grid-column:span 3}.span-4{grid-column:span 4}
+  .span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}
+  .span-8{grid-column:span 8}.span-9{grid-column:span 9}.span-12{grid-column:span 12}
+
+  .grid-2-7-5{display:grid;grid-template-columns:7fr 5fr;gap:3vw 4vh;align-items:start}
+  .grid-2-6-6{display:grid;grid-template-columns:1fr 1fr;gap:3vw 4vh;align-items:start}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:3vw 4vh;align-items:start}
+  .grid-3-3{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:minmax(0,1fr);gap:2.4vh 2vw}
+  .grid-4{display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:3vh 3vw;flex:1;align-content:center}
+  .grid-6{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:3vh 2.4vw;flex:1;align-content:center}
+
+  .col{display:flex;flex-direction:column;gap:2vh}
+  .row{display:flex;align-items:center;gap:2vw}
+  .fill{flex:1}
+  .center{align-items:center;justify-content:center;text-align:center}
+
+  .callout{
+    padding:2vh 2vw;border-left:3px solid var(--accent);
+    font-family:var(--sans),var(--sans-zh);font-size:max(14px,1vw);line-height:1.55;opacity:.9;
+  }
+
+  .ico{width:1em;height:1em;display:inline-block;vertical-align:-.12em;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+  .ico-lg{width:2.4vw;height:2.4vw;stroke-width:1.4;display:inline-block}
+  .ico-md{width:1.6vw;height:1.6vw;stroke-width:1.6;display:inline-block;vertical-align:-.4em}
+
+  .geo-square{width:.7vw;height:.7vw;background:var(--accent);display:inline-block;vertical-align:middle}
+
+  .frame-img{overflow:hidden;position:relative;background:var(--paper);box-sizing:border-box;width:100%}
+  .frame-img > img{width:100%;height:100%;object-fit:cover;object-position:center center;display:block}
+  .frame-img.fit-contain > img{object-fit:contain;object-position:center center}
+  .frame-img.r-21x9{aspect-ratio:21/9;max-height:54vh}
+  .frame-img.r-16x9{aspect-ratio:16/9;max-height:64vh}
+  .frame-img.r-16x10{aspect-ratio:16/10;max-height:56vh}
+  .frame-img.swiss-lined{border-top:2px solid var(--accent)}
+
+  .image-hero-body{
+    display:grid;grid-template-columns:6fr 6fr;gap:3vw;
+    padding:6.6vh 5vw 4.4vh;flex:1;align-content:start
+  }
+  .image-hero-stats{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:2vw;align-items:start
+  }
+
+  #nav{position:fixed;left:50%;bottom:2vh;transform:translateX(-50%);z-index:30;display:flex;gap:10px;padding:0;background:transparent;border:0}
+  #nav .dot{width:6px;height:6px;background:rgba(0,0,0,.28);cursor:pointer;transition:all .25s ease;border:0;padding:0;border-radius:0}
+  #nav .dot:hover{background:rgba(0,0,0,.55)}
+  #nav .dot.active{background:var(--accent);width:18px}
+  body.dark-bg #nav .dot{background:rgba(255,255,255,.32)}
+  body.dark-bg #nav .dot.active{background:var(--accent)}
+
+  #hint{position:fixed;bottom:2.4vh;right:2.5vw;z-index:30;font-family:var(--mono);font-size:14px;letter-spacing:.14em;text-transform:uppercase;opacity:.4;color:var(--ink-tint, currentColor)}
+  body.dark-bg #hint{color:var(--paper);opacity:.4}
+  body.low-power #hint{color:var(--accent);opacity:.72}
+
+  #overview [data-anim]{opacity:1!important;transform:none!important}
+  #overview .slide *{animation:none!important;transition:none!important}
+
+  .card-fill{background:#f5f5f4;border:0;color:var(--text-primary)}
+  .card-ink{background:var(--ink);border:0;color:var(--paper)}
+  .card-ink .t-meta,.card-ink .t-cat{color:rgba(255,255,255,.6)}
+  .card-accent{background:var(--accent);border:0;color:var(--accent-on)}
+  .card-accent .t-meta,.card-accent .t-cat{color:var(--accent-on)}
+
+  [data-anim]{opacity:1}
+  body.motion-ready [data-anim]{opacity:0}
+  body.motion-ready [data-anim="left"]{transform:translateX(-24px)}
+  body.motion-ready [data-anim="right"]{transform:translateX(24px)}
+  body.motion-ready [data-anim="line"]{opacity:0;transform:translateY(10px)}
+  body.motion-ready [data-animate="pipeline"] [data-anim]{opacity:.15}
+  body.low-power #deck{transition:none!important}
+  body.low-power *,body.low-power *::before,body.low-power *::after{animation:none!important;transition:none!important}
+  body.low-power.motion-ready [data-anim],
+  body.low-power [data-anim]{opacity:1!important;transform:none!important}
+
+  body.is-win .num-mega,body.is-win .kpi-thin{font-weight:300;letter-spacing:-.02em}
+  body.is-win [style*="font-weight:200"]{font-weight:300 !important}
+
+  body.canvas-mode{background:var(--paper)}
+  body.canvas-mode canvas.bg{display:none !important}
+  body.canvas-mode .slide{background:var(--paper);padding:0;align-items:stretch;justify-content:stretch}
+  body.canvas-mode .slide.hero{background:var(--paper)}
+
+  .canvas-card{
+    width:100vw;height:100vh;
+    background:var(--paper);color:var(--ink);
+    padding:5.6vh 5vw 4.4vh;
+    display:flex;flex-direction:column;
+    position:relative;overflow:hidden;
+    box-shadow:none;border-radius:0;
+  }
+  .slide.dark .canvas-card{background:var(--ink);color:var(--paper)}
+  .slide.accent .canvas-card{background:var(--accent);color:var(--accent-on)}
+  .slide.grey .canvas-card{background:var(--grey-1);color:var(--ink)}
+  .slide.split .canvas-card{padding:0;flex-direction:row}
+
+  canvas.ascii-bg{
+    position:absolute;inset:0;width:100%;height:100%;
+    pointer-events:none;z-index:0;
+    mix-blend-mode:screen;opacity:.92;
+  }
+  .canvas-card > *:not(.ascii-bg){position:relative;z-index:1}
+  .slide.accent .canvas-card .chrome-min{color:rgba(255,255,255,.62)}
+  .slide.accent .canvas-card .t-meta{color:rgba(255,255,255,.7)}
+
+  .num-mega{
+    font-family:var(--sans);font-weight:200;
+    font-size:9vw;line-height:1;letter-spacing:-.04em;font-feature-settings:"tnum"
+  }
+  .kpi-thin{
+    font-family:var(--sans);font-weight:200;
+    font-size:14vw;line-height:.92;letter-spacing:-.045em;font-feature-settings:"tnum"
+  }
+  .kpi-thin .unit{font-size:.3em;font-weight:300;opacity:.55;margin-left:.15em;vertical-align:.6em}
+  .kpi-thin.accent{color:var(--accent)}
+
+  .kpi-row-4{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    gap:0;padding-top:2.4vh;border-top:1px solid var(--grey-2)
+  }
+  .kpi-row-4 > .kpi-cell{
+    padding:1.6vh 1.6vw 0;border-left:1px solid var(--grey-2)
+  }
+  .kpi-row-4 > .kpi-cell:first-child{padding-left:0;border-left:none}
+  .kpi-cell .lbl{font-family:var(--mono);font-size:max(14px,.78vw);letter-spacing:.18em;text-transform:uppercase;opacity:.55;margin-bottom:1.2vh}
+  .kpi-cell .nb{font-family:var(--sans);font-weight:250;font-size:3.2vw;line-height:1;letter-spacing:-.025em;font-feature-settings:"tnum"}
+  .kpi-cell .nb .unit{font-size:.32em;font-weight:300;opacity:.6;margin-left:.1em;vertical-align:.4em}
+  .kpi-cell .note{font-family:var(--sans),var(--sans-zh);font-size:max(16px,.92vw);line-height:1.5;opacity:.7;margin-top:1.2vh}
+
+  .timeline-v{
+    --tl-axis-w:24px;--tl-dot:8px;
+    position:relative;margin-top:var(--sp-7)
+  }
+  .timeline-v::before{
+    content:"";position:absolute;
+    left:calc(var(--tl-axis-w) / 2);transform:translateX(-50%);
+    top:var(--sp-5);bottom:var(--sp-5);width:1px;
+    background:repeating-linear-gradient(to bottom,currentColor 0 4px,transparent 4px 8px);
+    opacity:.35;pointer-events:none;z-index:0
+  }
+  .tl-node{
+    position:relative;
+    display:grid;grid-template-columns:var(--tl-axis-w) minmax(0,5em) minmax(0,10em) 1fr;
+    gap:0 var(--sp-5);align-items:center;padding:var(--sp-7) 0
+  }
+  .tl-node .dot{
+    width:var(--tl-dot);height:var(--tl-dot);border-radius:50%;
+    background:currentColor;justify-self:center;z-index:1
+  }
+  .tl-node.accent .dot{background:var(--accent)}
+  .tl-node .yr{font-family:var(--mono);font-weight:500;font-size:max(14px,1vw);letter-spacing:.04em}
+  .tl-node .multi{
+    font-family:var(--sans);font-weight:200;
+    font-size:clamp(28px,2.8vw,56px);line-height:.95;letter-spacing:-.025em;
+    white-space:nowrap;overflow:hidden;min-width:0
+  }
+  .tl-node .multi .unit{font-size:.36em;font-weight:300;opacity:.6;margin-left:.2em;vertical-align:.42em;letter-spacing:0}
+  .tl-node.accent .multi{color:var(--accent)}
+  .tl-node .desc{font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.55;opacity:.78;min-width:0}
+
+  .timeline-h{
+    --tl-axis-w:8px;--tl-dot:8px;
+    position:relative;flex:1;display:flex;align-items:center
+  }
+  .timeline-h::before{
+    content:"";position:absolute;
+    top:50%;left:5%;right:5%;height:1px;transform:translateY(-50%);
+    background:repeating-linear-gradient(to right,currentColor 0 4px,transparent 4px 8px);
+    opacity:.35;pointer-events:none;z-index:0
+  }
+  .timeline-h .tl-row{
+    position:relative;width:100%;
+    display:grid;grid-template-columns:repeat(4,1fr);align-items:center
+  }
+  .timeline-h .th-node{position:relative;display:flex;justify-content:center}
+  .timeline-h .th-node .dot{
+    width:var(--tl-dot);height:var(--tl-dot);border-radius:50%;
+    background:var(--ink);z-index:1;position:relative
+  }
+  .timeline-h .th-node.accent .dot{background:var(--accent)}
+  .timeline-h .th-node .label{
+    position:absolute;left:50%;transform:translateX(-50%);
+    width:13vw;text-align:center;display:flex;flex-direction:column;gap:.4vh
+  }
+  .timeline-h .th-node.up .label{bottom:calc(50% + 22px)}
+  .timeline-h .th-node.down .label{top:calc(50% + 22px)}
+  .timeline-h .th-node .yr{font-family:var(--mono);font-size:max(16px,.94vw);letter-spacing:.05em;color:var(--text-helper);font-weight:600}
+  .timeline-h .th-node.accent .yr{color:var(--accent)}
+  .timeline-h .th-node .name{font-family:var(--sans);font-size:max(20px,1.3vw);font-weight:500;color:var(--text-primary);line-height:1.2;letter-spacing:-.005em}
+  .timeline-h .th-node.accent .name{color:var(--accent)}
+  .timeline-h .th-node .desc{font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);color:var(--text-secondary);font-weight:400;line-height:1.5}
+
+  .geo-icon{width:5vw;height:5vw;display:block;margin-bottom:2.2vh;color:var(--ink);flex-shrink:0}
+  .geo-icon svg{width:100%;height:100%;overflow:visible}
+  .geo-icon .stroke{fill:none;stroke:currentColor;stroke-width:1.4}
+
+  .sub-grid-3-2{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:1.4vh 1.4vw;flex:1;align-content:stretch;margin-top:3vh}
+  .sub-card{
+    background:var(--grey-1);padding:2.4vh 1.6vw 2vh;
+    display:flex;flex-direction:column;position:relative;border-radius:3px;min-height:0
+  }
+  .slide.dark .sub-card{background:rgba(255,255,255,.06)}
+  .sub-card.accent{background:var(--accent);color:var(--accent-on)}
+  .sub-card .nb-corner{
+    position:absolute;top:1.6vh;right:1.4vw;
+    font-family:var(--mono);font-size:max(14px,.8vw);letter-spacing:.16em;opacity:.55
+  }
+  .sub-card .ttl{font-family:var(--sans),var(--sans-zh);font-weight:500;font-size:max(17px,1.5vw);line-height:1.2;letter-spacing:-.015em;margin-bottom:1vh}
+  .sub-card .desc{font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.55;opacity:.78;margin-top:auto}
+
+  .stack-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1.6vw;flex:1;margin-top:6vh;align-items:stretch}
+  .stack-block{
+    display:flex;flex-direction:column;padding:3.2vh 1.8vw 2.4vh;position:relative;min-height:0
+  }
+  .stack-block.b-accent{background:var(--accent);color:var(--accent-on)}
+  .stack-block.b-grey{background:var(--grey-1);color:var(--ink)}
+  .stack-block.b-ink{background:var(--ink);color:var(--paper)}
+  .stack-block .layer-nb{font-family:var(--mono);font-size:max(14px,.84vw);letter-spacing:.18em;opacity:.65;margin-bottom:auto}
+  .stack-block .layer-ttl{font-family:var(--sans),var(--sans-zh);font-weight:400;font-size:max(17px,2vw);line-height:1.1;margin-top:1vh;letter-spacing:-.02em}
+  .stack-block .layer-desc{font-family:var(--sans),var(--sans-zh);font-weight:400;font-size:max(16px,.94vw);line-height:1.55;opacity:.88;margin-top:1.4vh}
+  .stack-block .lucide{width:2.6vw;height:2.6vw;stroke-width:1.4;margin-bottom:1.6vh;flex-shrink:0}
+  .stack-block .layer-tag{font-family:var(--mono);font-size:max(14px,.74vw);letter-spacing:.16em;text-transform:uppercase;opacity:.7;margin-top:1.6vh;border-top:1px solid currentColor;padding-top:1vh}
+
+  .h-bar-chart{
+    display:grid;grid-template-columns:11em minmax(0,1fr) 8em;
+    gap:1.6vh 1.6vw;align-items:center;margin-top:2.4vh;font-feature-settings:"tnum"
+  }
+  .h-bar-chart .row-lbl{font-family:var(--sans),var(--sans-zh);font-weight:500;font-size:max(14px,1vw);letter-spacing:-.005em;text-align:left}
+  .h-bar-chart .row-track{height:3.2vh;background:var(--grey-1);position:relative;overflow:hidden}
+  .h-bar-chart .row-fill{height:100%;background:var(--ink);position:absolute;left:0;top:0;transition:width 1s cubic-bezier(.5,0,.2,1)}
+  .h-bar-chart .row-fill.accent{background:var(--accent)}
+  .h-bar-chart .row-val{font-family:var(--sans);font-weight:250;font-size:max(16px,1.5vw);letter-spacing:-.02em;line-height:1}
+  .h-bar-chart .row-val .unit{font-size:.5em;opacity:.55;font-weight:300;margin-left:.15em;letter-spacing:.04em}
+
+  .duo-compare{
+    display:grid;grid-template-columns:1fr 1px 1fr;
+    gap:0 3.4vw;flex:1;align-items:stretch;margin-top:8vh
+  }
+  .duo-compare .vrule{background:var(--grey-2);width:1px;align-self:stretch}
+  .duo-compare .col{display:flex;flex-direction:column;gap:1.6vh;padding:0 .4vw}
+  .duo-compare .col-tag{
+    font-family:var(--mono);font-size:max(14px,.78vw);
+    letter-spacing:.16em;text-transform:uppercase;color:var(--grey-3);
+    display:flex;align-items:center;gap:.6vw
+  }
+  .duo-compare .col-tag .num{font-weight:600;color:var(--ink);border:1px solid var(--ink);padding:.2em .6em;font-size:.92em}
+  .duo-compare .col.accent .col-tag .num{color:var(--accent);border-color:var(--accent)}
+  .duo-compare .col-ttl{font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:3.6vw;line-height:1;letter-spacing:-.03em}
+  .duo-compare .col.accent .col-ttl{color:var(--accent)}
+  .duo-compare .col-desc{font-family:var(--sans),var(--sans-zh);font-size:max(16px,1.04vw);line-height:1.55;opacity:.78;max-width:30vw}
+  .duo-compare .col-list{list-style:none;display:flex;flex-direction:column;gap:1vh;margin-top:auto;padding-top:2vh;border-top:1px solid var(--grey-2)}
+  .duo-compare .col-list li{font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.5;padding-left:1.4em;position:relative}
+  .duo-compare .col-list li::before{content:"";position:absolute;left:0;top:.6em;width:.5em;height:1px;background:currentColor;opacity:.55}
+  .duo-compare .col.accent .col-list li::before{background:var(--accent);opacity:1}
+
+  .split-half{display:grid;grid-template-columns:1fr 1fr;gap:0;flex:1;align-items:stretch}
+  .split-half > .half{padding:5vh 3.4vw;display:flex;flex-direction:column;min-width:0}
+  .split-half > .half.b-accent{background:var(--accent);color:var(--accent-on)}
+  .split-half > .half.b-ink{background:var(--ink);color:var(--paper)}
+
+  .canvas-card .chrome-min{
+    display:flex;justify-content:space-between;align-items:flex-start;
+    font-family:var(--mono);font-size:14px;font-weight:500;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--text-helper);
+    flex:0 0 auto;margin-bottom:var(--sp-9);
+  }
+  .canvas-card .chrome-min .l,.canvas-card .chrome-min .r{max-width:48vw;line-height:1.5}
+  .slide.dark .canvas-card .chrome-min{color:rgba(255,255,255,.62)}
+
+  .t-cat{
+    font-family:var(--mono);font-size:14px;font-weight:600;
+    letter-spacing:.15em;text-transform:uppercase;color:var(--text-helper);line-height:1.3
+  }
+  .t-cat.accent{color:var(--accent)}
+  .t-cat.on-dark{color:rgba(255,255,255,.78)}
+  .t-meta{
+    font-family:var(--mono);font-size:14px;font-weight:500;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--text-helper);line-height:1.45
+  }
+  .t-body{font-family:var(--sans),var(--sans-zh);font-size:18px;font-weight:400;color:var(--text-primary);line-height:1.5;letter-spacing:-.005em}
+
+  .dot-mat{
+    --d:14px;
+    background-image:radial-gradient(currentColor 1.4px,transparent 1.6px);
+    background-size:var(--d) var(--d);background-position:0 0;opacity:.5
+  }
+  .ring-mat{
+    --d:18px;
+    background-image:radial-gradient(circle at 50% 50%,transparent 2px,currentColor 2px,currentColor 2.6px,transparent 2.7px);
+    background-size:var(--d) var(--d);opacity:.55
+  }
+
+  .h-statement{
+    font-family:var(--sans),var(--sans-zh);font-weight:200;
+    font-size:min(7.6vw,14vh);line-height:1.05;letter-spacing:-.045em;
+  }
+  .stmt-anchor{
+    font-family:var(--mono);font-size:max(14px,.82vw);
+    letter-spacing:.16em;text-transform:uppercase;opacity:.5;
+    position:absolute;right:5vw;bottom:8vh
+  }
+
+  .four-cards{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1.6vw;
+    margin-top:var(--sp-7);flex:1;align-content:start
+  }
+  .fc-col{
+    display:flex;flex-direction:column;gap:var(--sp-5);
+    padding:var(--sp-6) var(--sp-5);border-top:3px solid var(--accent)
+  }
+  .fc-col .fc-ttl{font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(2.8vw,5vh);line-height:1;letter-spacing:-.025em}
+  .fc-col .fc-desc{font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.55;font-weight:300;color:var(--text-secondary)}
+
+  @media (max-width:900px){
+    .h-hero{font-size:16vw}.h-hero-zh{font-size:13vw}.h-xl{font-size:9vw}
+    .kpi-hero{font-size:32vw}
+    .pipeline{grid-template-columns:repeat(2,1fr)}
+    .grid-2-7-5,.grid-2-6-6{grid-template-columns:1fr}
+    .grid-12{grid-template-columns:repeat(6,1fr)}
+  }
+</style>
+</head>
+<body class="canvas-mode">
+<script>
+  if(/Win/i.test(navigator.platform || navigator.userAgentData?.platform || '')){
+    document.body.classList.add('is-win');
+  }
+  (function(){
+    const KEY = 'guizang-ppt-low-power';
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const stored = localStorage.getItem(KEY);
+    window.__lowPowerMode = stored === '1' || (stored === null && reduced);
+    function updateHint(){
+      const hint = document.getElementById('hint');
+      if(hint) hint.textContent = `← → 翻页 · B ${window.__lowPowerMode ? '动态' : '静态'} · ESC 索引`;
+    }
+    window.__setLowPowerMode = function(on, opts={}){
+      window.__lowPowerMode = !!on;
+      document.body.classList.toggle('low-power', window.__lowPowerMode);
+      if(opts.persist !== false) localStorage.setItem(KEY, window.__lowPowerMode ? '1' : '0');
+      if(window.__lowPowerMode && document.getAnimations){
+        document.getAnimations().forEach(a=>a.cancel());
+      }
+      updateHint();
+      dispatchEvent(new CustomEvent('swiss-low-power-change', {detail:{on:window.__lowPowerMode}}));
+      if(window.__playSlide) window.__playSlide(window.__currentSlideIndex || 0);
+    };
+    document.body.classList.toggle('low-power', window.__lowPowerMode);
+    addEventListener('DOMContentLoaded', updateHint, {once:true});
+  })();
+</script>
+
+<canvas id="bg-grid" class="bg"></canvas>
+<div id="hint">← → 翻页 · B 静态 · ESC 索引</div>
+
+<div id="deck">
+
+<!-- ============================================================
+     01 / 14 · 封面 · IKB 满屏 + ASCII 呼吸场
+     ============================================================ -->
+<section class="slide accent" data-animate="hero">
+  <div class="canvas-card">
+    <canvas class="ascii-bg" aria-hidden="true"></canvas>
+    <div class="chrome-min">
+      <div class="l">Matrix Calculator · SJTU</div>
+      <div class="r">C99 · 26.06.09 · 01 / 14</div>
+    </div>
+    <div style="flex:1;padding:0;display:grid;grid-template-rows:auto 1fr auto;gap:2.6vh">
+      <div data-anim="kicker" class="t-meta" style="color:rgba(255,255,255,.78);letter-spacing:.22em">MATRIX CALCULATOR SJTU</div>
+      <h1 data-anim="title" style="align-self:center;font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(7.8vw,14vh);line-height:1.25;letter-spacing:-.025em;color:#fff">C 语言矩阵库<br/><span style="font-weight:600">网页端</span>实现<br/><span style="font-weight:600">分块微内核</span>优化</h1>
+      <div data-anim="bottom" style="display:grid;grid-template-rows:auto auto;gap:1.6vh;border-top:1px solid rgba(255,255,255,.22);padding-top:2vh">
+        <div data-anim="lead" class="lead" style="max-width:52ch;color:rgba(255,255,255,.86)">纯 C99 实现 · 零外部依赖 · 可移植优化 · 对标 Apple Accelerate</div>
+        <div style="display:flex;justify-content:space-between;align-items:end">
+          <div class="t-meta" style="color:rgba(255,255,255,.6)">SJTU · 2026</div>
+          <div class="t-meta" style="color:rgba(255,255,255,.6)">→ swipe / arrow keys</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     02 / 14 · 目录
+     ============================================================ -->
+<section class="slide light" data-animate="four-cards">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">CONTENTS · 目录</div>
+      <div class="r">02 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh">
+      <div style="width:80px;height:3px;background:var(--accent)"></div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(6.4vw,11.2vh);line-height:.96;letter-spacing:-.035em">目录</h2>
+    </div>
+    <div data-anim="up" style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:2vw;align-content:start;margin-top:3vh">
+      <!-- Part 01 -->
+      <div style="border-top:3px solid var(--accent);padding-top:2vh;display:flex;flex-direction:column;gap:1.6vh">
+        <div style="font-family:var(--mono);font-size:18px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:1.2vh">PART 01 · 项目简介</div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(20px,1.2vw);line-height:2.1;color:var(--text-primary)">
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">01</span> 模块架构与分层设计</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">02</span> 项目文件树</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">03</span> 性能演进路线</div>
+        </div>
+      </div>
+      <!-- Part 02 -->
+      <div style="border-top:3px solid var(--accent);padding-top:2vh;display:flex;flex-direction:column;gap:1.6vh">
+        <div style="font-family:var(--mono);font-size:18px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:1.2vh">PART 02 · 矩阵乘法优化</div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(20px,1.2vw);line-height:2.1;color:var(--text-primary)">
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">01</span> 方法一：原始三重循环</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">02</span> 方法二：i-k-j 循环重排</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">03</span> 方法三：64×64 分块</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">04</span> 方法四：4×4 微内核</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">05</span> Benchmark 与 Apple BLAS</div>
+        </div>
+      </div>
+      <!-- Part 03 -->
+      <div style="border-top:3px solid var(--accent);padding-top:2vh;display:flex;flex-direction:column;gap:1.6vh">
+        <div style="font-family:var(--mono);font-size:18px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:1.2vh">PART 03 · 分解与应用</div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(20px,1.2vw);line-height:2.1;color:var(--text-primary)">
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">01</span> LU 分解与方程求解</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">02</span> C 库 vs 浏览器计算器</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">03</span> 组员分工与致谢</div>
+          <div style="display:flex;gap:.8vw"><span style="color:var(--text-helper);font-family:var(--mono);min-width:2em;font-size:max(18px,1.08vw)">04</span> 总结</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     03 / 14 · 三层架构 · Stack Build
+     ============================================================ -->
+<section class="slide light" data-animate="stack-build">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">01 · ARCHITECTURE · 架构设计</div>
+      <div class="r">03 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh">
+      <div class="t-cat" style="color:var(--accent)">THREE-LAYER ARCHITECTURE</div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(5.8vw,10.2vh);line-height:.96;letter-spacing:-.035em;white-space:nowrap">按职责分层，头文件即接口</h2>
+    </div>
+    <div class="stack-row">
+      <div class="stack-block b-ink">
+        <div class="layer-nb">LAYER 01</div>
+        <svg class="lucide" style="width:2.6vw;height:2.6vw;stroke-width:1.4;margin-bottom:1.6vh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="0"/><path d="M7 7h10M7 12h10M7 17h10"/></svg>
+        <div class="layer-ttl">matrix_core</div>
+        <div class="layer-desc">矩阵生命周期管理：创建、释放、索引、复制、填充、打印。错误码枚举覆盖 9 种异常。</div>
+        <div class="layer-tag">存储 · 索引 · 错误处理</div>
+      </div>
+      <div class="stack-block b-accent">
+        <div class="layer-nb">LAYER 02</div>
+        <svg class="lucide" style="width:2.6vw;height:2.6vw;stroke-width:1.4;margin-bottom:1.6vh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        <div class="layer-ttl">matrix_ops</div>
+        <div class="layer-desc">算术运算 + 4 种矩阵乘法实现：原始 i-j-k、重排 i-k-j、分块、4×4 微内核优化。</div>
+        <div class="layer-tag">运算 · 乘法 · 优化内核</div>
+      </div>
+      <div class="stack-block b-grey">
+        <div class="layer-nb">LAYER 03</div>
+        <svg class="lucide" style="width:2.6vw;height:2.6vw;stroke-width:1.4;margin-bottom:1.6vh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="0"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        <div class="layer-ttl">matrix_lu</div>
+        <div class="layer-desc">LU 分解求解器：前向代入解 Ly=b，回代解 Ux=y，行列式 = U 对角线乘积。</div>
+        <div class="layer-tag">分解 · 代入 · 行列式</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     04 / 14 · 文件树 · Six Cells
+     ============================================================ -->
+<section class="slide light" data-animate="grid-reveal">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">01 · FILE TREE · 项目文件</div>
+      <div class="r">04 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh;margin-bottom:2vh">
+      <div class="t-cat" style="color:var(--accent)">REPOSITORY STRUCTURE</div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(5.8vw,10.2vh);line-height:.96;letter-spacing:-.035em">文件树</h2>
+    </div>
+    <div data-anim="up" class="sub-grid-3-2">
+      <div class="sub-card" style="position:relative;overflow:hidden">
+        <span style="position:absolute;right:-0.4vw;bottom:-1.8vh;font-family:var(--mono);font-size:min(10vw,18vh);font-weight:900;line-height:1;pointer-events:none;letter-spacing:-.04em"><span style="color:#7C3AED;opacity:.2">.h</span><span style="color:#0052CC;opacity:.2">.c</span></span>
+        <span class="nb-corner">CORE</span>
+        <div class="ttl" style="font-size:max(19px,1.3vw);font-weight:600">matrix_core.h / .c</div>
+        <div class="desc" style="font-size:max(17px,1vw);line-height:1.6">矩阵生命周期管理。创建、释放、索引、复制、填充、打印。定义 Matrix 结构体和 9 种错误码枚举。</div>
+      </div>
+      <div class="sub-card" style="position:relative;overflow:hidden">
+        <span style="position:absolute;right:-0.4vw;bottom:-1.8vh;font-family:var(--mono);font-size:min(10vw,18vh);font-weight:900;line-height:1;pointer-events:none;letter-spacing:-.04em"><span style="color:#7C3AED;opacity:.2">.h</span><span style="color:#0052CC;opacity:.2">.c</span></span>
+        <span class="nb-corner">OPS</span>
+        <div class="ttl" style="font-size:max(19px,1.3vw);font-weight:600">matrix_ops.h / .c</div>
+        <div class="desc" style="font-size:max(17px,1vw);line-height:1.6">算术运算 + 4 种矩阵乘法实现（原始/重排/分块/微内核）。加减、标量乘、转置、Frobenius 范数。</div>
+      </div>
+      <div class="sub-card" style="position:relative;overflow:hidden">
+        <span style="position:absolute;right:-0.4vw;bottom:-1.8vh;font-family:var(--mono);font-size:min(10vw,18vh);font-weight:900;line-height:1;pointer-events:none;letter-spacing:-.04em"><span style="color:#7C3AED;opacity:.2">.h</span><span style="color:#0052CC;opacity:.2">.c</span></span>
+        <span class="nb-corner">LU</span>
+        <div class="ttl" style="font-size:max(19px,1.3vw);font-weight:600">matrix_lu.h / .c</div>
+        <div class="desc" style="font-size:max(17px,1vw);line-height:1.6">无主元 LU 分解。前向代入解 Ly=b，回代解 Ux=y，行列式 = U 对角线乘积。</div>
+      </div>
+      <div class="sub-card" style="position:relative;overflow:hidden">
+        <span style="position:absolute;right:-0.4vw;bottom:-1.8vh;font-family:var(--mono);font-size:min(10vw,18vh);font-weight:900;color:#0052CC;opacity:.2;line-height:1;pointer-events:none;letter-spacing:-.04em">.c</span>
+        <span class="nb-corner">DEMO</span>
+        <div class="ttl" style="font-size:max(19px,1.3vw);font-weight:600">main.c</div>
+        <div class="desc" style="font-size:max(17px,1vw);line-height:1.6">教师演示程序。展示 LU 分解、方程求解、行列式计算的完整流程。</div>
+      </div>
+      <div class="sub-card" style="position:relative;overflow:hidden">
+        <span style="position:absolute;right:-0.4vw;bottom:-1.8vh;font-family:var(--mono);font-size:min(10vw,18vh);font-weight:900;color:#C2410C;opacity:.2;line-height:1;pointer-events:none;letter-spacing:-.04em">.html</span>
+        <span class="nb-corner">WEB</span>
+        <div class="ttl" style="font-size:max(19px,1.3vw);font-weight:600">matrix-toolbox.html</div>
+        <div class="desc" style="font-size:max(17px,1vw);line-height:1.6">独立浏览器计算器。JavaScript 原生实现，支持全部矩阵运算和 LU 分解交互演示。</div>
+      </div>
+      <div class="sub-card" style="position:relative;overflow:hidden">
+        <span style="position:absolute;right:-0.4vw;bottom:-1.8vh;font-family:var(--mono);font-size:min(10vw,18vh);font-weight:900;color:#0052CC;opacity:.2;line-height:1;pointer-events:none;letter-spacing:-.04em">.c</span>
+        <span class="nb-corner">TEST</span>
+        <div class="ttl" style="font-size:max(19px,1.3vw);font-weight:600">test_matrix_ops.c</div>
+        <div class="desc" style="font-size:max(17px,1vw);line-height:1.6">乘法回归测试。对比微内核与原始循环，覆盖方阵、非方阵、非 4 倍数维度。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     05 / 14 · 性能演进 · Vertical Timeline
+     ============================================================ -->
+<section class="slide light" data-animate="progression">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">01 · EVOLUTION · 性能演进</div>
+      <div class="r">05 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh;margin-bottom:2vh">
+      <div class="t-cat" style="color:var(--accent)">OPTIMIZATION JOURNEY</div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(5.8vw,10.2vh);line-height:.96;letter-spacing:-.035em;white-space:nowrap">三次迭代 18.66× 提速</h2>
+    </div>
+    <div class="timeline-v" style="flex:1">
+      <div class="tl-node">
+        <div class="tl-axis"><span class="dot"></span></div>
+        <div class="yr">V1</div>
+        <div class="multi">1<small>×</small></div>
+        <div class="desc">原始 i-j-k 三重循环。B 矩阵按列访问导致严重 cache miss，768×768 耗时 565ms。</div>
+      </div>
+      <div class="tl-node">
+        <div class="tl-axis"><span class="dot"></span></div>
+        <div class="yr">V2</div>
+        <div class="multi">10.5<small>×</small></div>
+        <div class="desc">循环重排 i-k-j + 分块 64×64。B 矩阵按行访问，适配 L1 缓存行。768×768 降至 54ms。</div>
+      </div>
+      <div class="tl-node accent">
+        <div class="tl-axis"><span class="dot"></span></div>
+        <div class="yr">V3</div>
+        <div class="multi">18.66<small>×</small></div>
+        <div class="desc">4×4 微内核 + restrict + 局部累加器。768×768 达到 30ms，29.924 GFLOP/s。</div>
+      </div>
+    </div>
+    <div class="kpi-row-4">
+      <div class="kpi-cell"><div class="lbl">原始版本</div><div class="nb">564.9<span class="unit">ms</span></div><div class="note">i-j-k 三重循环</div></div>
+      <div class="kpi-cell"><div class="lbl">分块版本</div><div class="nb">53.5<span class="unit">ms</span></div><div class="note">64×64 分块</div></div>
+      <div class="kpi-cell"><div class="lbl">优化版本</div><div class="nb accent" style="color:var(--accent)">30.3<span class="unit">ms</span></div><div class="note">4×4 微内核</div></div>
+      <div class="kpi-cell"><div class="lbl">Accelerate</div><div class="nb">1.65<span class="unit">ms</span></div><div class="note">Apple BLAS</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     06 / 14 · 方法一：原始 i-j-k 三重循环
+     ============================================================ -->
+<section class="slide light" data-animate="statement">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">02 · METHOD 01 · 原始三重循环</div>
+      <div class="r">06 / 14</div>
+    </div>
+    <div data-anim="line" style="flex:1;display:grid;grid-template-columns:5fr 7fr;gap:3vw;align-items:start">
+      <!-- 左：原理说明 -->
+      <div style="display:flex;flex-direction:column;gap:2.4vh;padding-top:1vh">
+        <div>
+          <div class="t-cat" style="color:var(--accent)">METHOD 01 · NAIVE I-J-K</div>
+          <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(4.6vw,8.2vh);line-height:.96;letter-spacing:-.035em;margin-top:1vh">原始三重循环</h2>
+        </div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.6;font-weight:300;color:var(--text-secondary)">
+          <p>循环顺序 <strong style="font-weight:500;color:var(--text-primary)">i → j → k</strong>，直接翻译矩阵乘法定义：</p>
+          <p style="margin-top:1vh;font-family:var(--mono);font-size:max(14px,.84vw);background:var(--grey-1);padding:1vh 1vw">C[i][j] = Σ A[i][k] × B[k][j]</p>
+        </div>
+        <!-- 流程图 -->
+        <div style="display:flex;flex-direction:column;gap:1.2vh;margin-top:0.5vh">
+          <div class="t-cat" style="color:var(--text-helper)">内存访问流程</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:1vw;align-items:center">
+            <div style="background:var(--accent);color:var(--accent-on);padding:.6vh 1vw;font-family:var(--mono);font-size:max(13px,.78vw);font-weight:500">A[i][k]</div>
+            <div style="font-family:var(--sans),var(--sans-zh);font-size:max(14px,.84vw);color:var(--text-secondary)">→ 沿行连续访问 · <span style="color:var(--accent)">cache hit</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:1vw;align-items:center">
+            <div style="background:var(--ink);color:var(--paper);padding:.6vh 1vw;font-family:var(--mono);font-size:max(13px,.78vw);font-weight:500">B[k][j]</div>
+            <div style="font-family:var(--sans),var(--sans-zh);font-size:max(14px,.84vw);color:var(--text-secondary)">→ 沿列跳跃 6144B · <span style="color:#e63946;font-weight:500">cache miss 每次</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:1vw;align-items:center">
+            <div style="background:var(--grey-1);color:var(--ink);padding:.6vh 1vw;font-family:var(--mono);font-size:max(13px,.78vw);font-weight:500">C[i][j]</div>
+            <div style="font-family:var(--sans),var(--sans-zh);font-size:max(14px,.84vw);color:var(--text-secondary)">→ 读-改-写 · 内存往返</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--grey-2);padding-top:1.6vh;display:flex;gap:3vw">
+          <div><div class="t-meta">耗时</div><div style="font-family:var(--sans);font-weight:200;font-size:2.8vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh">564.9<span style="font-size:.5em;font-weight:300;opacity:.55">ms</span></div></div>
+          <div><div class="t-meta">加速比</div><div style="font-family:var(--sans);font-weight:200;font-size:2.8vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh">1<span style="font-size:.5em;font-weight:300;opacity:.55">×</span></div></div>
+        </div>
+      </div>
+      <!-- 右：代码 -->
+      <div style="background:var(--ink);color:var(--paper);padding:2.4vh 2vw;font-family:var(--mono);font-size:max(13px,.78vw);line-height:1.55;letter-spacing:-.005em;overflow:auto">
+        <div style="opacity:.45;margin-bottom:1.2vh">// MatrixMultiplyOriginal — i-j-k 三重循环</div>
+        <div style="opacity:.6">// i 遍历 A 的每一行</div>
+        <div><span style="color:#C5E803">for</span> (<span style="color:#5B7BFF">int</span> i = 0; i &lt; A-&gt;row; ++i) {</div>
+        <div style="opacity:.6">&nbsp;&nbsp;// j 遍历 B 的每一列</div>
+        <div>&nbsp;&nbsp;<span style="color:#C5E803">for</span> (<span style="color:#5B7BFF">int</span> j = 0; j &lt; B-&gt;column; ++j) {</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> sum = 0.0;</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;&nbsp;// k 累加求和 — B 按列跳跃！</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#C5E803">for</span> (<span style="color:#5B7BFF">int</span> k = 0; k &lt; A-&gt;column; ++k) {</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sum += A-&gt;data[MatrixIndex(A, i, k)]</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;* B-&gt;data[MatrixIndex(B, <span style="color:#e63946">k</span>, j)];</div>
+        <div style="opacity:.5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ 跳整行</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;}</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;C-&gt;data[MatrixIndex(C, i, j)] = sum;</div>
+        <div>&nbsp;&nbsp;}</div>
+        <div>}</div>
+        <div style="margin-top:2vh;border-top:1px solid rgba(255,255,255,.15);padding-top:1.2vh;opacity:.6">
+        // 问题：内层 k 循环中<br/>
+        // B[k][j] → B[k+1][j] 跳跃 768×8 = 6144 字节<br/>
+        // 远超 64 字节缓存行 → 每次 cache miss<br/>
+        // 延迟从 ~4 周期暴涨到 ~200 周期</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     07 / 14 · 方法二：i-k-j 循环重排
+     ============================================================ -->
+<section class="slide light" data-animate="statement">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">02 · METHOD 02 · 循环重排</div>
+      <div class="r">07 / 14</div>
+    </div>
+    <div data-anim="line" style="flex:1;display:grid;grid-template-columns:5fr 7fr;gap:3vw;align-items:start">
+      <!-- 左：原理说明 -->
+      <div style="display:flex;flex-direction:column;gap:2.4vh;padding-top:1vh">
+        <div>
+          <div class="t-cat" style="color:var(--accent)">METHOD 02 · I-K-J REORDER</div>
+          <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(4.6vw,8.2vh);line-height:.96;letter-spacing:-.035em;margin-top:1vh">循环重排</h2>
+        </div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.6;font-weight:300;color:var(--text-secondary)">
+          <p>将循环顺序从 i-j-k 改为 <strong style="font-weight:500;color:var(--text-primary)">i → k → j</strong>，内层循环沿 j 方向（行方向）遍历 B 矩阵。</p>
+        </div>
+        <!-- 优化对比 -->
+        <div style="display:flex;flex-direction:column;gap:1.2vh">
+          <div class="t-cat" style="color:var(--text-helper)">访问模式对比</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1vw">
+            <div style="background:var(--grey-1);padding:1.2vh 1vw">
+              <div style="font-family:var(--mono);font-size:max(13px,.78vw);color:var(--text-helper);margin-bottom:.6vh">BEFORE · i-j-k</div>
+              <div style="font-family:var(--mono);font-size:max(13px,.78vw)">B[0][j], B[1][j]...</div>
+              <div style="font-family:var(--sans),var(--sans-zh);font-size:max(14px,.84vw);color:#e63946;margin-top:.4vh">列跳跃 · 每次 miss</div>
+            </div>
+            <div style="background:var(--accent);color:var(--accent-on);padding:1.2vh 1vw">
+              <div style="font-family:var(--mono);font-size:max(13px,.78vw);opacity:.7;margin-bottom:.6vh">AFTER · i-k-j</div>
+              <div style="font-family:var(--mono);font-size:max(13px,.78vw)">B[k][0], B[k][1]...</div>
+              <div style="font-family:var(--sans),var(--sans-zh);font-size:max(14px,.84vw);margin-top:.4vh">行连续 · 全部 hit</div>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1.2vh">
+          <div class="t-cat" style="color:var(--text-helper)">两个关键优化</div>
+          <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.55;color:var(--text-secondary)">
+            <p><strong style="font-weight:500;color:var(--text-primary)">① B 按行访问</strong>：相邻元素仅差 8 字节，落在同一条 64B 缓存行内，一次加载服务 8 次访问。</p>
+            <p style="margin-top:1vh"><strong style="font-weight:500;color:var(--text-primary)">② aik 标量复用</strong>：提取为局部变量后保留在寄存器中，内层循环省去 A 的索引开销。</p>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--grey-2);padding-top:1.6vh;display:flex;gap:3vw">
+          <div><div class="t-meta">耗时</div><div style="font-family:var(--sans);font-weight:200;font-size:2.8vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh">~215<span style="font-size:.5em;font-weight:300;opacity:.55">ms</span></div></div>
+          <div><div class="t-meta">加速比</div><div style="font-family:var(--sans);font-weight:200;font-size:2.8vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh;color:var(--accent)">2.6<span style="font-size:.5em;font-weight:300;opacity:.55">×</span></div></div>
+        </div>
+      </div>
+      <!-- 右：代码 -->
+      <div style="background:var(--ink);color:var(--paper);padding:2.4vh 2vw;font-family:var(--mono);font-size:max(13px,.78vw);line-height:1.55;letter-spacing:-.005em;overflow:auto">
+        <div style="opacity:.45;margin-bottom:1.2vh">// MatrixMultiplyIKJ — i-k-j 循环重排</div>
+        <div><span style="color:#C5E803">for</span> (<span style="color:#5B7BFF">int</span> i = 0; i &lt; A-&gt;row; ++i) {</div>
+        <div style="opacity:.6">&nbsp;&nbsp;// k 提到 j 前面！</div>
+        <div>&nbsp;&nbsp;<span style="color:#C5E803">for</span> (<span style="color:#5B7BFF">int</span> k = 0; k &lt; A-&gt;column; ++k) {</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;&nbsp;// aik 提取为标量，保留在寄存器</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> aik = A-&gt;data[MatrixIndex(A, i, k)];</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;&nbsp;// j 内层循环 — B 按行连续访问</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#C5E803">for</span> (<span style="color:#5B7BFF">int</span> j = 0; j &lt; B-&gt;column; ++j) {</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;C-&gt;data[MatrixIndex(C, i, j)]</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+= aik * B-&gt;data[MatrixIndex(B, k, <span style="color:#C5E803">j</span>)];</div>
+        <div style="opacity:.5">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ 行连续</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;}</div>
+        <div>&nbsp;&nbsp;}</div>
+        <div>}</div>
+        <div style="margin-top:2vh;border-top:1px solid rgba(255,255,255,.15);padding-top:1.2vh;opacity:.6">
+        // 效果：B[k][j] → B[k][j+1] 仅差 8 字节<br/>
+        // 落在同一条 64B 缓存行内<br/>
+        // 一个缓存行服务 8 次连续访问<br/>
+        // <span style="color:#C5E803">cache hit 率接近 100%</span><br/><br/>
+        // 局限：C 矩阵大时仍会 cache thrashing</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     08 / 14 · 方法三：64×64 分块 + 4 路展开
+     ============================================================ -->
+<section class="slide light" data-animate="statement">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">02 · METHOD 03 · 缓存分块</div>
+      <div class="r">08 / 14</div>
+    </div>
+    <div data-anim="line" style="flex:1;display:grid;grid-template-columns:5fr 7fr;gap:3vw;align-items:start">
+      <!-- 左：原理说明 -->
+      <div style="display:flex;flex-direction:column;gap:2vh;padding-top:1vh">
+        <div>
+          <div class="t-cat" style="color:var(--accent)">METHOD 03 · BLOCKED + UNROLL</div>
+          <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(3.4vw,6vh);line-height:1;letter-spacing:-.03em;margin-top:1vh">64×64 分块 + 4 路展开</h2>
+        </div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.6;font-weight:300;color:var(--text-secondary)">
+          <p>768×768 矩阵有 4.7MB，但 CPU 的高速缓存装不下。<strong style="font-weight:500;color:var(--text-primary)">切成 64×64 小块</strong>，每次只算一小块，数据一直在高速缓存里不搬走。</p>
+        </div>
+        <!-- 问答框 1：L1 缓存 -->
+        <div style="background:var(--grey-1);padding:1.6vh 1.4vw;border-left:3px solid var(--accent)">
+          <div style="font-family:var(--sans),var(--sans-zh);font-weight:600;font-size:max(16px,.94vw);color:var(--text-primary);margin-bottom:.8vh">L1 缓存是什么？为什么这么重要？</div>
+          <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.6;color:var(--text-secondary)">
+            <p>CPU 内部有三级缓存，越靠近 CPU 越快但越小：</p>
+            <p style="margin-top:.4vh">• <strong style="color:var(--text-primary)">L1 缓存</strong>：32-48KB，访问约 4 个时钟周期，最快</p>
+            <p>• <strong style="color:var(--text-primary)">L2 缓存</strong>：256KB-1MB，访问约 12 个周期</p>
+            <p>• <strong style="color:var(--text-primary)">主内存（RAM）</strong>：几 GB，访问约 200 个周期，比 L1 慢 50 倍</p>
+            <p style="margin-top:.6vh">64×64 个 double = 32KB，刚好塞进 L1。算这一小块时所有数据都在"快车道"上，不用去"慢车道"取。这就是为什么分块后速度能快 10 倍。</p>
+          </div>
+        </div>
+        <!-- 问答框 2：4 路展开 -->
+        <div style="background:var(--grey-1);padding:1.6vh 1.4vw;border-left:3px solid var(--accent)">
+          <div style="font-family:var(--sans),var(--sans-zh);font-weight:600;font-size:max(16px,.94vw);color:var(--text-primary);margin-bottom:.8vh">为什么偏偏是 4 路展开，不是 2 或 8？</div>
+          <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.6;color:var(--text-secondary)">
+            <p>正常循环：算 1 个 → 判断"还要继续吗" → 算 1 个 → 判断 → ...</p>
+            <p>4 路展开：<strong style="color:var(--text-primary)">一口气算 4 个</strong> → 判断 → 算 4 个 → ...</p>
+            <p style="margin-top:.6vh">选 4 的三个原因：</p>
+            <p>① CPU 的浮点乘法器通常有 2-4 个，4 路刚好打满，再多了也不会更快</p>
+            <p>② 4 个 double = 32 字节，对齐友好，CPU 读取效率最高</p>
+            <p>③ 展开太多（比如 16 路）代码体积膨胀，反而挤占指令缓存，得不偿失</p>
+            <p style="margin-top:.6vh">实测 2 路、4 路、8 路，<strong style="color:var(--text-primary)">4 路是性价比最高的甜点</strong>。</p>
+          </div>
+        </div>
+        <!-- KPI -->
+        <div style="border-top:1px solid var(--grey-2);padding-top:1.4vh;display:flex;gap:3vw;margin-top:auto">
+          <div><div class="t-meta">耗时</div><div style="font-family:var(--sans);font-weight:200;font-size:2.8vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh">~53.5<span style="font-size:.5em;font-weight:300;opacity:.55">ms</span></div></div>
+          <div><div class="t-meta">加速比</div><div style="font-family:var(--sans);font-weight:200;font-size:2.8vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh;color:var(--accent)">10.5<span style="font-size:.5em;font-weight:300;opacity:.55">×</span></div></div>
+        </div>
+      </div>
+      <!-- 右：代码 -->
+      <div style="background:var(--ink);color:var(--paper);padding:2.4vh 2vw;font-family:var(--mono);font-size:max(13px,.78vw);line-height:1.55;letter-spacing:-.005em;overflow:auto">
+        <div style="opacity:.45;margin-bottom:1.2vh">// MatrixMultiplyBlocked — 分块 + 4 路展开</div>
+        <div><span style="color:#5B7BFF">#define</span> BLOCK_SIZE 64</div>
+        <div style="margin-top:.8vh;opacity:.6">// 外层：按 64×64 分块</div>
+        <div><span style="color:#C5E803">for</span> (ii = 0; ii &lt; N; ii += BLOCK_SIZE)</div>
+        <div>&nbsp;<span style="color:#C5E803">for</span> (kk = 0; kk &lt; N; kk += BLOCK_SIZE)</div>
+        <div>&nbsp;&nbsp;<span style="color:#C5E803">for</span> (jj = 0; jj &lt; N; jj += BLOCK_SIZE)</div>
+        <div style="margin-top:.8vh;opacity:.6">&nbsp;&nbsp;&nbsp;// 块内：i-k-j 循环</div>
+        <div>&nbsp;&nbsp;&nbsp;<span style="color:#C5E803">for</span> (i = ii; i &lt; i_end; ++i)</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#C5E803">for</span> (k = kk; k &lt; k_end; ++k) {</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> aik = a_row[k];</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// j 方向 4 路展开</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#C5E803">for</span> (j = jj; j+3 &lt; j_end; <span style="color:#C5E803">j += 4</span>) {</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;c_row[j]&nbsp;&nbsp; += aik * b_row[j];</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;c_row[j+1] += aik * b_row[j+1];</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;c_row[j+2] += aik * b_row[j+2];</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;c_row[j+3] += aik * b_row[j+3];</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;}</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#C5E803">for</span> (; j &lt; j_end; ++j) <span style="opacity:.5">// 尾部</span></div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;c_row[j] += aik * b_row[j];</div>
+        <div>&nbsp;&nbsp;&nbsp;&nbsp;}</div>
+        <div style="margin-top:2vh;border-top:1px solid rgba(255,255,255,.15);padding-top:1.2vh;opacity:.6">
+        // 64×64 块 = 32KB → 适配 L1<br/>
+        // 4 路展开 → 减少 75% 循环开销<br/><br/>
+        // 局限：内层仍对 C 做读-改-写<br/>
+        // 每次迭代 2 次内存往返</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     09 / 14 · 方法四：4×4 微内核 + 分块
+     ============================================================ -->
+<section class="slide light" data-animate="statement">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">02 · METHOD 04 · 4×4 微内核</div>
+      <div class="r">09 / 14</div>
+    </div>
+    <div data-anim="line" style="flex:1;display:grid;grid-template-columns:5fr 7fr;gap:3vw;align-items:start">
+      <!-- 左：原理说明 -->
+      <div style="display:flex;flex-direction:column;gap:2vh;padding-top:1vh">
+        <div>
+          <div class="t-cat" style="color:var(--accent)">METHOD 04 · 4×4 MICROKERNEL</div>
+          <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(4.6vw,8.2vh);line-height:.96;letter-spacing:-.035em;margin-top:1vh">微内核 + 分块</h2>
+        </div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.55;font-weight:300;color:var(--text-secondary)">
+          <p>上一步虽然分块了，但每次算 C 的一个元素还是要"从内存读出来→加上去→写回内存"，反复折腾。</p>
+          <p style="margin-top:1vh">这一步：<strong style="font-weight:500;color:var(--text-primary)">用 16 个局部变量代替 C 矩阵</strong>，全程在 CPU 寄存器里算，768 轮循环结束后才写回一次。</p>
+        </div>
+        <!-- 两个核心概念 -->
+        <div style="display:flex;flex-direction:column;gap:1.6vh">
+          <div class="t-cat" style="color:var(--text-helper)">两个核心概念</div>
+          <div style="background:var(--grey-1);padding:1.6vh 1.2vw">
+            <div style="font-family:var(--sans),var(--sans-zh);font-weight:500;font-size:max(16px,.94vw);color:var(--text-primary);margin-bottom:.6vh">寄存器是什么？</div>
+            <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.55;color:var(--text-secondary)">CPU 内部最快的存储，比 L1 缓存还快 10 倍。容量极小（只有几十个），但访问零延迟。编译器会自动把局部变量放进去。</div>
+          </div>
+          <div style="background:var(--grey-1);padding:1.6vh 1.2vw">
+            <div style="font-family:var(--sans),var(--sans-zh);font-weight:500;font-size:max(16px,.94vw);color:var(--text-primary);margin-bottom:.6vh">restrict 是什么？</div>
+            <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.55;color:var(--text-secondary)">C 语言的一个关键字，放在指针前面。意思是"我保证这块内存跟别人不重叠"。没有它，编译器怕你改 A 会影响到 B，不敢把变量留在寄存器里。加了 restrict，编译器就放心大胆优化。</div>
+          </div>
+        </div>
+        <!-- 关键优化 -->
+        <div style="display:flex;flex-direction:column;gap:1vh">
+          <div class="t-cat" style="color:var(--text-helper)">实际效果</div>
+          <div style="font-family:var(--sans),var(--sans-zh);font-size:max(15px,.88vw);line-height:1.55;color:var(--text-secondary)">
+            <p>768 次循环 × 16 个元素 × 读+写 = <strong style="color:var(--text-primary)">24576 次内存操作 → 16 次</strong></p>
+            <p>B 的一行 4 个数被 A 的 4 行共享，读一次用 4 遍</p>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--grey-2);padding-top:1.6vh;display:flex;gap:2.4vw">
+          <div><div class="t-meta">耗时</div><div style="font-family:var(--sans);font-weight:200;font-size:2.4vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh">30.3<span style="font-size:.5em;font-weight:300;opacity:.55">ms</span></div></div>
+          <div><div class="t-meta">加速比</div><div style="font-family:var(--sans);font-weight:200;font-size:2.4vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh;color:var(--accent)">18.66<span style="font-size:.5em;font-weight:300;opacity:.55">×</span></div></div>
+          <div><div class="t-meta">吞吐</div><div style="font-family:var(--sans);font-weight:200;font-size:2.4vw;line-height:1;letter-spacing:-.03em;margin-top:.6vh">29.9<span style="font-size:.5em;font-weight:300;opacity:.55">GFLOP/s</span></div></div>
+        </div>
+      </div>
+      <!-- 右：代码 -->
+      <div style="background:var(--ink);color:var(--paper);padding:2vh 1.6vw;font-family:var(--mono);font-size:max(12px,.72vw);line-height:1.5;letter-spacing:-.005em;overflow:auto">
+        <div style="opacity:.45;margin-bottom:1vh">// Multiply4x4 — 每次算 C 的一个 4×4 小块</div>
+        <div><span style="color:#5B7BFF">static void</span> Multiply4x4(</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">const REAL * restrict</span> a, <span style="color:#5B7BFF">int</span> a_stride,</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">const REAL * restrict</span> b, <span style="color:#5B7BFF">int</span> b_stride,</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">REAL * restrict</span> c, <span style="color:#5B7BFF">int</span> c_stride,</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">int</span> inner) {</div>
+        <div style="opacity:.5">&nbsp;&nbsp;<span style="color:#C5E803">// restrict = "这块内存跟别人不重叠，放心优化"</span></div>
+        <div style="opacity:.6">&nbsp;&nbsp;// 先搞 16 个局部变量，代替 C 矩阵</div>
+        <div style="opacity:.6">&nbsp;&nbsp;// 这些变量会被 CPU 放进寄存器（最快的存储）</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> c00=0, c01=0, c02=0, c03=0;</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> c10=0, c11=0, c12=0, c13=0;</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> c20=0, c21=0, c22=0, c23=0;</div>
+        <div>&nbsp;&nbsp;<span style="color:#5B7BFF">REAL</span> c30=0, c31=0, c32=0, c33=0;</div>
+        <div style="margin-top:1vh;opacity:.6">&nbsp;&nbsp;// 沿内维 k 逐层累加</div>
+        <div>&nbsp;&nbsp;<span style="color:#C5E803">for</span>(k=0; k&lt;inner; ++k) {</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;// 取 B 的一行 4 个数</div>
+        <div>&nbsp;&nbsp;&nbsp;b0=b[k][0]; b1=b[k][1]; b2=b[k][2]; b3=b[k][3];</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;// 取 A 的 4 行各 1 个数</div>
+        <div>&nbsp;&nbsp;&nbsp;a0k=a0[k]; a1k=a1[k]; a2k=a2[k]; a3k=a3[k];</div>
+        <div style="margin-top:.6vh;opacity:.6">&nbsp;&nbsp;&nbsp;// 4×4=16 次乘加，全在寄存器里完成</div>
+        <div style="opacity:.6">&nbsp;&nbsp;&nbsp;// B 的 4 个数被 A 的 4 行共享（读一次用 4 遍）</div>
+        <div>&nbsp;&nbsp;&nbsp;c00+=a0k*b0; c01+=a0k*b1; c02+=a0k*b2; c03+=a0k*b3;</div>
+        <div>&nbsp;&nbsp;&nbsp;c10+=a1k*b0; c11+=a1k*b1; c12+=a1k*b2; c13+=a1k*b3;</div>
+        <div>&nbsp;&nbsp;&nbsp;c20+=a2k*b0; c21+=a2k*b1; c22+=a2k*b2; c23+=a2k*b3;</div>
+        <div>&nbsp;&nbsp;&nbsp;c30+=a3k*b0; c31+=a3k*b1; c32+=a3k*b2; c33+=a3k*b3;</div>
+        <div>&nbsp;&nbsp;}</div>
+        <div style="margin-top:1vh;opacity:.6">&nbsp;&nbsp;// 循环跑了 768 轮之后，才把 16 个结果写回 C</div>
+        <div style="opacity:.6">&nbsp;&nbsp;// 之前全程没碰过 C 矩阵的内存！</div>
+        <div>&nbsp;&nbsp;c[0]=c00; c[1]=c01; c[2]=c02; c[3]=c03; c+=stride;</div>
+        <div>&nbsp;&nbsp;c[0]=c10; c[1]=c11; c[2]=c12; c[3]=c13; c+=stride;</div>
+        <div>&nbsp;&nbsp;c[0]=c20; c[1]=c21; c[2]=c22; c[3]=c23; c+=stride;</div>
+        <div>&nbsp;&nbsp;c[0]=c30; c[1]=c31; c[2]=c32; c[3]=c33;</div>
+        <div>}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     10 / 14 · 性能数据 · Tech Spec
+     ============================================================ -->
+<section class="slide light" data-animate="tech-spec">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">02 · BENCHMARK · 性能基线</div>
+      <div class="r">10 / 14</div>
+    </div>
+    <div data-anim="up" style="flex:1;display:grid;grid-template-columns:5fr 7fr;gap:3vw;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:3vh">
+        <div>
+          <div style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(4.6vw,8.2vh);line-height:.96;letter-spacing:-.035em;white-space:nowrap">768×768 矩阵乘法</div>
+          <div style="font-family:var(--mono);font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-helper);margin-top:1.6vh">APPLE SILMAC · SINGLE THREAD</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2vh">
+          <div><div style="height:1px;background:var(--ink);width:100%"></div><div class="t-meta" style="margin-top:1.2vh">THROUGHPUT</div><div style="font-family:var(--sans);font-weight:200;font-size:min(4.6vw,7.6vh);line-height:.95;letter-spacing:-.04em;margin-top:.6vh">29.9<span style="font-size:.5em;font-weight:300;opacity:.55">GFLOP/s</span></div></div>
+          <div><div style="height:1px;background:var(--ink);width:100%"></div><div class="t-meta" style="margin-top:1.2vh">VS ORIGINAL</div><div style="font-family:var(--sans);font-weight:200;font-size:min(4.6vw,7.6vh);line-height:.95;letter-spacing:-.04em;margin-top:.6vh;color:var(--accent)">18.66<span style="font-size:.5em;font-weight:300;opacity:.55">×</span></div></div>
+          <div><div style="height:1px;background:var(--ink);width:100%"></div><div class="t-meta" style="margin-top:1.2vh">VS BLOCKED</div><div style="font-family:var(--sans);font-weight:200;font-size:min(4.6vw,7.6vh);line-height:.95;letter-spacing:-.04em;margin-top:.6vh">1.77<span style="font-size:.5em;font-weight:300;opacity:.55">×</span></div></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2.4vh">
+        <div class="t-cat" style="color:var(--accent)">MULTIPLICATION SPEED</div>
+        <div class="h-bar-chart">
+          <div class="row-lbl">方法一 · 原始三重循环</div><div class="row-track"><div class="row-fill" style="width:100%"></div></div><div class="row-val">564.9<span class="unit">ms</span></div>
+          <div class="row-lbl">方法二 · i-k-j 循环</div><div class="row-track"><div class="row-fill" style="width:38%"></div></div><div class="row-val">215.0<span class="unit">ms</span></div>
+          <div class="row-lbl">方法三 · 64×64 分块</div><div class="row-track"><div class="row-fill accent" style="width:9.5%"></div></div><div class="row-val">53.5<span class="unit">ms</span></div>
+          <div class="row-lbl">方法四 · 4×4 微内核</div><div class="row-track"><div class="row-fill accent" style="width:5.4%"></div></div><div class="row-val">30.3<span class="unit">ms</span></div>
+          <div class="row-lbl">Apple BLAS</div><div class="row-track"><div class="row-fill" style="width:0.3%"></div></div><div class="row-val">1.65<span class="unit">ms</span></div>
+        </div>
+        <div style="font-family:var(--mono);font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-helper);margin-top:1vh;border-top:1px solid var(--grey-2);padding-top:1.6vh">
+          256×256: 1.1ms &nbsp;·&nbsp; 512×512: 9.0ms &nbsp;·&nbsp; 768×768: 30.3ms
+        </div>
+        <!-- Apple BLAS 介绍 -->
+        <div style="border-top:1px solid var(--grey-2);padding-top:1.6vh;margin-top:1.6vh">
+          <div class="t-cat" style="color:var(--accent);margin-bottom:1vh">WHAT IS APPLE BLAS?</div>
+          <div style="font-family:var(--sans),var(--sans-zh);font-size:max(17px,1.02vw);line-height:1.6;color:var(--text-secondary)">
+            <p><strong style="color:var(--text-primary)">BLAS</strong>（Basic Linear Algebra Subprograms）是线性代数运算的工业标准接口。Apple Accelerate 是苹果官方的高性能数学库，内部使用 AMX 矩阵协处理器 + 多线程 + SIMD 向量化。</p>
+            <p style="margin-top:1.2vh">它快是因为<strong style="color:var(--text-primary)">用了硬件专用指令</strong>，而我们的代码是纯 C 软件实现。差距 18× 说明：硬件加速 vs 通用 CPU 的天花板差距就是这么大。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     11 / 14 · LU 分解流程 · Horizontal Timeline
+     ============================================================ -->
+<section class="slide light" data-animate="timeline-walk">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">03 · LU DECOMPOSITION · 分解求解</div>
+      <div class="r">11 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh;margin-bottom:4vh">
+      <div class="t-cat" style="color:var(--accent)">SOLVING Ax = b</div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(5.8vw,10.2vh);line-height:.96;letter-spacing:-.035em">LU 分解四步法</h2>
+    </div>
+    <div class="timeline-h" style="flex:1">
+      <div class="tl-row">
+        <div class="th-node accent up">
+          <span class="dot"></span>
+          <div class="label">
+            <span class="yr">STEP 01</span>
+            <span class="name">LU 分解</span>
+            <span class="desc">A = L·U<br/>无主元选取 O(n³)</span>
+          </div>
+        </div>
+        <div class="th-node down">
+          <span class="dot"></span>
+          <div class="label">
+            <span class="yr">STEP 02</span>
+            <span class="name">前向代入</span>
+            <span class="desc">解 Ly = b<br/>逐行前推 O(n²)</span>
+          </div>
+        </div>
+        <div class="th-node up">
+          <span class="dot"></span>
+          <div class="label">
+            <span class="yr">STEP 03</span>
+            <span class="name">回代</span>
+            <span class="desc">解 Ux = y<br/>逐行回推 O(n²)</span>
+          </div>
+        </div>
+        <div class="th-node accent down">
+          <span class="dot"></span>
+          <div class="label">
+            <span class="yr">STEP 04</span>
+            <span class="name">行列式</span>
+            <span class="desc">det(A) = ∏Uᵢᵢ<br/>对角线乘积 O(n)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:3vh">
+      <strong>数值说明：</strong>LUDecomposeNoPivot 有意实现为不选主元的 LU 分解，适用于教学和输入受控的场景。若需数值稳定性，应使用带主元选取的 LAPACK 分解。
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     12 / 14 · C 库 vs 浏览器 · Duo Compare
+     ============================================================ -->
+<section class="slide light" data-animate="duo-mirror">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">03 · DUAL · C 库 vs 浏览器</div>
+      <div class="r">12 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh">
+      <div class="t-cat" style="color:var(--accent)">TWO IMPLEMENTATIONS</div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(5.8vw,10.2vh);line-height:.96;letter-spacing:-.035em;white-space:nowrap">同一算法，两种载体</h2>
+    </div>
+    <div class="duo-compare">
+      <div class="col accent">
+        <div class="col-tag"><span class="num">01</span> C LIBRARY</div>
+        <div class="col-ttl">matrix_ops.c</div>
+        <div class="col-desc">生产级性能实现，面向 benchmark 和实际计算任务。</div>
+        <ul class="col-list">
+          <li>4×4 微内核 + 缓存分块</li>
+          <li>C99 restrict 指针优化</li>
+          <li>29.9 GFLOP/s @ 768²</li>
+          <li>编译器: GCC / Clang 任意</li>
+        </ul>
+      </div>
+      <div class="vrule"></div>
+      <div class="col">
+        <div class="col-tag"><span class="num">02</span> BROWSER</div>
+        <div class="col-ttl">matrix-toolbox.html</div>
+        <div class="col-desc">交互式教学工具，独立 HTML 文件，零安装零配置。</div>
+        <ul class="col-list">
+          <li>支持全部矩阵运算</li>
+          <li>LU 分解可视化</li>
+          <li>求解 Ax = b 交互演示</li>
+          <li>JavaScript 原生实现</li>
+        </ul>
+        <a href="../matrix-toolbox.html" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:.6em;margin-top:auto;padding:1.4vh 1.6vw;background:var(--accent);color:var(--accent-on);font-family:var(--sans),var(--sans-zh);font-size:max(16px,1vw);font-weight:500;letter-spacing:-.005em;text-decoration:none;transition:opacity .2s" onmouseenter="this.style.opacity='.82'" onmouseleave="this.style.opacity='1'">
+          <svg style="width:1.2vw;height:1.2vw;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          打开浏览器计算器 →
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     13 / 14 · 组员分工
+     ============================================================ -->
+<section class="slide light" data-animate="four-cards">
+  <div class="canvas-card">
+    <div class="chrome-min">
+      <div class="l">03 · TEAM · 组员分工</div>
+      <div class="r">13 / 14</div>
+    </div>
+    <div data-anim="line" style="display:flex;flex-direction:column;gap:1.4vh">
+      <div style="width:80px;height:3px;background:var(--accent)"></div>
+      <h2 style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(6.4vw,11.2vh);line-height:.96;letter-spacing:-.035em">组员分工</h2>
+    </div>
+    <div data-anim="up" style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:2vw;align-content:start;margin-top:1vh">
+      <!-- 刘林轩 -->
+      <div style="border-top:3px solid var(--accent);padding-top:2.4vh;display:flex;flex-direction:column;align-items:center;gap:1.6vh;text-align:center">
+        <img src="images/12-avatar-liu.jpg" alt="刘林轩" style="width:min(8vw,12vh);height:min(8vw,12vh);object-fit:cover;border-radius:16px;border:2px solid var(--accent)">
+        <div style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(3.6vw,6.4vh);line-height:.96;letter-spacing:-.03em;color:var(--accent)">刘林轩</div>
+        <div style="font-family:var(--mono);font-size:16px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-helper)">PRESENTATION</div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(18px,1.08vw);line-height:1.6;color:var(--text-secondary)">
+          <p>汇报展示</p>
+          <p style="margin-top:.6vh">负责项目讲解、现场演示与答辩</p>
+        </div>
+      </div>
+      <!-- 张耀天 -->
+      <div style="border-top:3px solid var(--accent);padding-top:2.4vh;display:flex;flex-direction:column;align-items:center;gap:1.6vh;text-align:center">
+        <img src="images/12-avatar-zhang.jpg" alt="张耀天" style="width:min(8vw,12vh);height:min(8vw,12vh);object-fit:cover;border-radius:16px;border:2px solid var(--accent)">
+        <div style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(3.6vw,6.4vh);line-height:.96;letter-spacing:-.03em;color:var(--accent)">张耀天</div>
+        <div style="font-family:var(--mono);font-size:16px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-helper)">DESIGN · HTML</div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(18px,1.08vw);line-height:1.6;color:var(--text-secondary)">
+          <p>HTML 生成设计</p>
+          <p style="margin-top:.6vh">matrix-toolbox.html 网页计算器设计与实现</p>
+        </div>
+      </div>
+      <!-- 吴沛松 -->
+      <div style="border-top:3px solid var(--accent);padding-top:2.4vh;display:flex;flex-direction:column;align-items:center;gap:1.6vh;text-align:center">
+        <img src="images/12-avatar-wu.jpg" alt="吴沛松" style="width:min(8vw,12vh);height:min(8vw,12vh);object-fit:cover;border-radius:16px;border:2px solid var(--accent)">
+        <div style="font-family:var(--sans),var(--sans-zh);font-weight:200;font-size:min(3.6vw,6.4vh);line-height:.96;letter-spacing:-.03em;color:var(--accent)">吴沛松</div>
+        <div style="font-family:var(--mono);font-size:16px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-helper)">CODE · DOCUMENTATION</div>
+        <div style="font-family:var(--sans),var(--sans-zh);font-size:max(18px,1.08vw);line-height:1.6;color:var(--text-secondary)">
+          <p>矩阵乘法优化设计</p>
+          <p style="margin-top:.6vh">四种乘法实现代码与介绍文档撰写</p>
+        </div>
+      </div>
+    </div>
+    <!-- 开发工具 -->
+    <div style="border-top:1px solid var(--grey-2);padding-top:2vh;margin-top:auto;display:flex;justify-content:center;align-items:center;gap:2.4vw">
+      <div style="font-family:var(--mono);font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-helper)">TOOLS</div>
+      <!-- VS Code -->
+      <div style="display:flex;align-items:center;gap:.6vw">
+        <svg style="width:2vw;height:2vw" viewBox="0 0 24 24" fill="#007ACC"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z"/></svg>
+        <span style="font-family:var(--sans);font-size:max(18px,1.1vw);color:var(--text-primary);font-weight:500">VS Code</span>
+      </div>
+      <!-- Claude Code -->
+      <div style="display:flex;align-items:center;gap:.6vw">
+        <svg style="width:2vw;height:2vw" viewBox="0 0 24 24" fill="#D97706"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
+        <span style="font-family:var(--sans);font-size:max(18px,1.1vw);color:var(--text-primary);font-weight:500">Claude Code</span>
+      </div>
+      <!-- Codex -->
+      <div style="display:flex;align-items:center;gap:.6vw">
+        <svg style="width:2vw;height:2vw" viewBox="0 0 24 24" fill="#10B981"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>
+        <span style="font-family:var(--sans);font-size:max(18px,1.1vw);color:var(--text-primary);font-weight:500">Codex</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     14 / 14 · 收束 · Split Closing
+     ============================================================ -->
+<section class="slide split" data-animate="split-statement">
+  <div class="canvas-card">
+    <div class="split-half">
+      <div class="half b-accent" style="padding:5.6vh 3.6vw 4.4vh;justify-content:space-between;position:relative;overflow:hidden">
+        <canvas class="ascii-bg" aria-hidden="true"></canvas>
+        <div class="chrome-min" style="margin-bottom:0;position:relative;z-index:1">
+          <div class="l">14 / 14</div>
+          <div class="r">CLOSING</div>
+        </div>
+        <div data-anim="manifesto" style="display:flex;flex-direction:column;gap:2vh;position:relative;z-index:1">
+          <div class="t-meta" style="color:rgba(255,255,255,.78);letter-spacing:.22em;margin-bottom:1.6vh">MANIFESTO</div>
+          <h2 style="font-family:var(--sans),var(--sans-zh);font-size:min(7.8vw,14vh);line-height:1.25;letter-spacing:-.025em;font-weight:200;color:#fff">写一次<span style="font-weight:600">纯 C</span><br/>到处跑<span style="font-weight:600">得快</span></h2>
+          <div style="font-family:var(--sans),var(--sans-zh);font-size:max(14px,1vw);line-height:1.6;color:rgba(255,255,255,.82);font-weight:400;max-width:36ch;margin-top:1.4vh">零外部依赖、可移植的高性能矩阵计算。从教学到生产，从命令行到浏览器。</div>
+        </div>
+        <div data-anim="signature" style="display:flex;justify-content:space-between;align-items:end;border-top:1px solid rgba(255,255,255,.22);padding-top:2vh;position:relative;z-index:1">
+          <div class="t-meta" style="color:rgba(255,255,255,.62)">SJTU · C 语言课程</div>
+          <div class="t-meta" style="color:rgba(255,255,255,.62)">26.06.09</div>
+        </div>
+      </div>
+
+      <div class="half" style="padding:5.6vh 3.6vw 4.4vh;justify-content:space-between">
+        <div class="chrome-min">
+          <div class="l">TAKEAWAYS</div>
+          <div class="r">03 KEY POINTS</div>
+        </div>
+        <div data-anim="rules" style="display:flex;flex-direction:column;gap:0">
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:2vw;align-items:start;padding:2.6vh 0;border-top:1px solid var(--border-subtle)">
+            <div style="font-family:var(--sans);font-weight:200;font-size:min(4.4vw,7.8vh);line-height:.9;color:var(--text-primary)">01</div>
+            <div>
+              <h3 style="font-family:var(--sans),var(--sans-zh);font-weight:400;font-size:max(18px,1.8vw);line-height:1.2;letter-spacing:-.015em;color:var(--text-primary);margin-bottom:1vh">可移植性优先</h3>
+              <p style="font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.6;color:var(--text-secondary);font-weight:400">不依赖 SIMD、线程 API 或第三方库，纯 C99 即可达到 18× 加速。</p>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:2vw;align-items:start;padding:2.6vh 0;border-top:1px solid var(--border-subtle)">
+            <div style="font-family:var(--sans);font-weight:200;font-size:min(4.4vw,7.8vh);line-height:.9;color:var(--text-primary)">02</div>
+            <div>
+              <h3 style="font-family:var(--sans),var(--sans-zh);font-weight:400;font-size:max(18px,1.8vw);line-height:1.2;letter-spacing:-.015em;color:var(--text-primary);margin-bottom:1vh">缓存是第一瓶颈</h3>
+              <p style="font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.6;color:var(--text-secondary);font-weight:400">分块 + 微内核的本质是让数据驻留在 L1 缓存，减少 DRAM 访问。</p>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:2vw;align-items:start;padding:2.6vh 0;border-top:1px solid var(--border-subtle);border-bottom:2px solid var(--accent)">
+            <div style="font-family:var(--sans);font-weight:200;font-size:min(4.4vw,7.8vh);line-height:.9;color:var(--accent)">03</div>
+            <div>
+              <h3 style="font-family:var(--sans),var(--sans-zh);font-weight:400;font-size:max(18px,1.8vw);line-height:1.2;letter-spacing:-.015em;color:var(--accent);margin-bottom:1vh">教学与生产并行</h3>
+              <p style="font-family:var(--sans),var(--sans-zh);font-size:max(16px,.94vw);line-height:1.6;color:var(--text-secondary);font-weight:400">同一套代码既可用于课程学习，也达到了 29.9 GFLOP/s 的生产级性能。</p>
+            </div>
+          </div>
+        </div>
+        <div data-anim="foot" class="t-meta" style="color:var(--text-helper);text-align:right">→ 完 · END OF PRESENTATION</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<div id="nav"></div>
+
+<script>
+const deck=document.getElementById('deck');
+const slides=deck.querySelectorAll('.slide');
+const nav=document.getElementById('nav');
+let idx=0,total=slides.length,lock=false;
+
+deck.style.width=(total*100)+'vw';
+
+slides.forEach((s,i)=>{
+  const b=document.createElement('button');
+  b.className='dot';b.dataset.i=i;b.setAttribute('aria-label','Page '+(i+1));
+  b.onclick=()=>go(i);
+  nav.appendChild(b);
+});
+
+function go(n){
+  if(lock)return;
+  idx=Math.max(0,Math.min(total-1,n));
+  window.__currentSlideIndex = idx;
+  deck.style.transform=`translateX(${-idx*100}vw)`;
+  nav.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===idx));
+  const el=slides[idx];
+  const isDark = el.classList.contains('dark') || el.classList.contains('accent');
+  document.body.classList.toggle('dark-bg', isDark);
+  darkMode = isDark;
+  if(window.__playSlide) setTimeout(()=>window.__playSlide(idx), 450);
+  lock=true;setTimeout(()=>lock=false,700);
+}
+
+let overviewOn=false;
+const ov=document.createElement('div');
+ov.id='overview';
+ov.style.cssText='position:fixed;inset:0;z-index:100;background:rgba(250,250,248,.96);backdrop-filter:blur(12px);display:none;overflow-y:auto;padding:4vh 4vw';
+document.body.appendChild(ov);
+
+function buildOverview(){
+  ov.innerHTML='';
+  const grid=document.createElement('div');
+  grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:2vh 1.6vw;max-width:90vw;margin:0 auto';
+  slides.forEach((s,i)=>{
+    const card=document.createElement('div');
+    card.style.cssText='cursor:pointer;overflow:hidden;border:2px solid '+(i===idx?'var(--accent)':'rgba(0,0,0,.12)')+';transition:border-color .2s';
+    card.onmouseenter=()=>card.style.borderColor='rgba(0,0,0,.4)';
+    card.onmouseleave=()=>card.style.borderColor=i===idx?'var(--accent)':'rgba(0,0,0,.12)';
+    const wrap=document.createElement('div');
+    const isDark = s.classList.contains('dark') || s.classList.contains('accent');
+    wrap.style.cssText='width:100%;aspect-ratio:16/9;overflow:hidden;position:relative;pointer-events:none;background:'+(isDark?'var(--ink)':'var(--paper)');
+    const clone=s.cloneNode(true);
+    clone.style.cssText='width:100vw;height:100vh;transform:scale('+(1/4.5)+');transform-origin:top left;position:absolute;top:0;left:0;pointer-events:none';
+    wrap.appendChild(clone);
+    const label=document.createElement('div');
+    label.style.cssText='padding:6px 10px;font-family:var(--mono);font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);opacity:.7';
+    label.textContent=(i+1)+' / '+total;
+    card.appendChild(wrap);
+    card.appendChild(label);
+    card.onclick=()=>{toggleOverview();go(i)};
+    grid.appendChild(card);
+  });
+  ov.appendChild(grid);
+}
+
+function toggleOverview(){
+  overviewOn=!overviewOn;
+  if(overviewOn){buildOverview();ov.style.display='block';}
+  else{ov.style.display='none';}
+}
+
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){e.preventDefault();toggleOverview();return;}
+  if(e.key && e.key.toLowerCase()==='b' && !e.metaKey && !e.ctrlKey && !e.altKey){
+    e.preventDefault();
+    window.__setLowPowerMode(!window.__lowPowerMode);
+    return;
+  }
+  if(overviewOn)return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '||e.key==='ArrowDown'){
+    go(idx+1);return;
+  }
+  if(e.key==='ArrowLeft'||e.key==='PageUp'||e.key==='ArrowUp')go(idx-1);
+  if(e.key==='Home')go(0);
+  if(e.key==='End')go(total-1);
+});
+
+let wheelTO=null,wheelAcc=0;
+addEventListener('wheel',e=>{
+  wheelAcc+=e.deltaY+e.deltaX;
+  if(Math.abs(wheelAcc)>50){
+    go(idx+(wheelAcc>0?1:-1));wheelAcc=0;
+  }
+  clearTimeout(wheelTO);wheelTO=setTimeout(()=>wheelAcc=0,150);
+},{passive:true});
+
+let tx=0,ty=0;
+addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY},{passive:true});
+addEventListener('touchend',e=>{
+  const dx=(e.changedTouches[0].clientX-tx);
+  const dy=(e.changedTouches[0].clientY-ty);
+  if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy)){
+    go(idx+(dx<0?1:-1));
+  }
+},{passive:true});
+
+const initialSlideParam = new URLSearchParams(location.search).get('slide');
+const initialSlide = initialSlideParam ? Number(initialSlideParam) - 1 : 0;
+go(Number.isFinite(initialSlide) ? initialSlide : 0);
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>lucide.createIcons();</script>
+
+<script type="module">
+let motion;
+try {
+  motion = await import('../assets/motion.min.js');
+} catch(e1) {
+  try {
+    motion = await import('https://cdn.jsdelivr.net/npm/motion@11.11.17/+esm');
+  } catch(e2) {
+    console.warn('[motion] local + CDN both failed, disabling animations', e1, e2);
+    document.querySelectorAll('[data-anim]').forEach(el=>{el.style.opacity='1';el.style.transform='none'});
+  }
+}
+
+if(motion){
+  const { animate } = motion;
+  document.body.classList.add('motion-ready');
+
+  const EASE_PROD       = [.2, 0, .38, .9];
+  const EASE_ENTRY_EXP  = [0, 0, .3, 1];
+
+  const slides = [...document.querySelectorAll('.slide')];
+  let lastIdx = -1;
+
+  function resetAnims(slide){
+    slide.querySelectorAll('[data-anim]').forEach(el=>{
+      el.style.opacity='';
+      el.style.transform='';
+    });
+  }
+
+  const fade = (el, opts={})=>animate(el,
+    {opacity:[0,1], y:[opts.y ?? 12, 0]},
+    {duration:opts.duration ?? .6, delay:opts.delay ?? 0,
+     easing:opts.easing ?? EASE_ENTRY_EXP});
+
+  function rHero(slide, all){
+    const chrome = slide.querySelector('.chrome-min');
+    if(chrome) animate(chrome, {opacity:[0,1]}, {duration:.24, easing:EASE_PROD});
+    const title = slide.querySelector('[data-anim="title"]');
+    if(title) animate(title, {opacity:[0,1], y:[30,0]}, {duration:.8, delay:.2, easing:EASE_ENTRY_EXP});
+    const kicker = slide.querySelector('[data-anim="kicker"]');
+    if(kicker) animate(kicker, {opacity:[0,1], x:[-12,0]}, {duration:.5, delay:.1, easing:EASE_ENTRY_EXP});
+    const bottom = slide.querySelector('[data-anim="bottom"]');
+    if(bottom) animate(bottom, {opacity:[0,1], y:[16,0]}, {duration:.6, delay:.6, easing:EASE_ENTRY_EXP});
+  }
+
+  function rProgression(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.6, y:10});
+    const nodes = [...slide.querySelectorAll('.tl-node')];
+    nodes.forEach((node, i)=>{
+      const base = .35 + i*.32;
+      animate(node, {opacity:[0,1], y:[14, 0]},
+        {duration:.55, delay:base, easing:EASE_ENTRY_EXP});
+      const multi = node.querySelector('.multi');
+      if(multi) animate(multi, {scale:[.92, 1], opacity:[0,1]},
+        {duration:.5, delay:base + .12, easing:EASE_ENTRY_EXP});
+    });
+    const kpis = [...slide.querySelectorAll('.kpi-cell')];
+    kpis.forEach((cell, i)=>{
+      animate(cell, {opacity:[0,1], y:[8, 0]},
+        {duration:.4, delay:1.4 + i*.07, easing:EASE_PROD});
+    });
+  }
+
+  function rStatement(slide, all){
+    const halves = [...slide.querySelectorAll('[data-anim]')];
+    halves.forEach((el, i)=>{
+      animate(el, {opacity:[0,1], y:[20,0]},
+        {duration:.6, delay:i*.2, easing:EASE_ENTRY_EXP});
+    });
+  }
+
+  function rGridReveal(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.6, y:10});
+    const cards = [...slide.querySelectorAll('.sub-card')];
+    cards.forEach((card, i)=>{
+      animate(card, {opacity:[0,1], y:[20,0], scale:[.96, 1]},
+        {duration:.5, delay:.3 + i*.09, easing:EASE_ENTRY_EXP});
+    });
+  }
+
+  function rStackBuild(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.6, y:10});
+    const blocks = [...slide.querySelectorAll('.stack-block')];
+    if(blocks[1]) animate(blocks[1], {opacity:[0,1], scaleY:[.85, 1]},
+      {duration:.55, delay:.3, easing:EASE_ENTRY_EXP});
+    if(blocks[0]) animate(blocks[0], {opacity:[0,1], y:[-22, 0]},
+      {duration:.6, delay:.6, easing:EASE_ENTRY_EXP});
+    if(blocks[2]) animate(blocks[2], {opacity:[0,1], y:[22, 0]},
+      {duration:.6, delay:.6, easing:EASE_ENTRY_EXP});
+  }
+
+  function rFourCards(slide, all){
+    const topRule = slide.querySelector('[data-anim="line"] > div:first-child');
+    if(topRule){
+      topRule.style.transformOrigin = 'left center';
+      animate(topRule, {opacity:[0,1], scaleX:[0, 1]},
+        {duration:.5, delay:.1, easing:EASE_ENTRY_EXP});
+    }
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head){
+      const title = head.querySelector(':scope > div:nth-child(2)');
+      if(title) animate(title, {opacity:[0,1], y:[14, 0]},
+        {duration:.55, delay:.4, easing:EASE_ENTRY_EXP});
+    }
+    const grid = slide.querySelector('[data-anim="up"]');
+    if(!grid) return;
+    animate(grid, {opacity:[0,1]}, {duration:.3, delay:.55, easing:EASE_PROD});
+    const cards = [...grid.children];
+    cards.forEach((card, i)=>{
+      animate(card, {opacity:[0,1], y:[18, 0]},
+        {duration:.55, delay:.7 + i*.13, easing:EASE_ENTRY_EXP});
+    });
+  }
+
+  function rBarGrow(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.6, y:10});
+    const fills = [...slide.querySelectorAll('.row-fill')];
+    fills.forEach((fill, i)=>{
+      const target = fill.style.width;
+      fill.style.width = '0%';
+      animate(fill, {width:['0%', target]},
+        {duration:.65, delay:.85 + i*.14, easing:EASE_ENTRY_EXP});
+    });
+    const vals = [...slide.querySelectorAll('.row-val')];
+    vals.forEach((v, i)=>{
+      animate(v, {opacity:[0,1]}, {duration:.3, delay:1.5 + i*.14, easing:EASE_PROD});
+    });
+  }
+
+  function rTechSpec(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.5, y:8});
+    const main = slide.querySelector('[data-anim="up"]');
+    if(main) animate(main, {opacity:[0,1]}, {duration:.3, delay:.25, easing:EASE_PROD});
+    const fills = [...slide.querySelectorAll('.row-fill')];
+    fills.forEach((fill, i)=>{
+      const target = fill.style.width;
+      fill.style.width = '0%';
+      animate(fill, {width:['0%', target]},
+        {duration:.65, delay:.5 + i*.12, easing:EASE_ENTRY_EXP});
+    });
+    const vals = [...slide.querySelectorAll('.row-val')];
+    vals.forEach((v, i)=>{
+      animate(v, {opacity:[0,1]}, {duration:.3, delay:1.2 + i*.12, easing:EASE_PROD});
+    });
+  }
+
+  function rDuoMirror(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.6, y:10});
+    const cols = [...slide.querySelectorAll('.duo-compare .col')];
+    const vrule = slide.querySelector('.duo-compare .vrule');
+    if(cols[0]) animate(cols[0], {opacity:[0,1], x:[-24, 0]},
+      {duration:.65, delay:.4, easing:EASE_ENTRY_EXP});
+    if(vrule){
+      vrule.style.transformOrigin = 'center';
+      animate(vrule, {opacity:[0,1], scaleY:[0, 1]},
+        {duration:.55, delay:.55, easing:EASE_ENTRY_EXP});
+    }
+    if(cols[1]) animate(cols[1], {opacity:[0,1], x:[24, 0]},
+      {duration:.65, delay:.7, easing:EASE_ENTRY_EXP});
+  }
+
+  function rSplitStatement(slide, all){
+    const halves = [...slide.querySelectorAll('.half')];
+    if(halves[0]){
+      animate(halves[0], {opacity:[0,1]}, {duration:.4, easing:EASE_PROD});
+    }
+    if(halves[1]){
+      animate(halves[1], {opacity:[0,1]}, {duration:.4, delay:.3, easing:EASE_PROD});
+    }
+  }
+
+  function rTimelineWalk(slide, all){
+    const head = slide.querySelector('[data-anim="line"]');
+    if(head) fade(head, {duration:.55, y:10});
+    const tl = slide.querySelector('.timeline-h');
+    if(tl) animate(tl, {opacity:[0,1]}, {duration:.4, delay:.35, easing:EASE_PROD});
+    const nodes = [...slide.querySelectorAll('.timeline-h .th-node')];
+    nodes.forEach((node, i)=>{
+      const base = .55 + i*.18;
+      const dot = node.querySelector('.dot');
+      const label = node.querySelector('.label');
+      if(dot){
+        dot.style.transformOrigin='center';
+        animate(dot, {opacity:[0,1], scale:[.2, 1]},
+          {duration:.45, delay:base, easing:EASE_ENTRY_EXP});
+      }
+      if(label){
+        const fromY = node.classList.contains('up') ? 8 : -8;
+        animate(label, {opacity:[0,1], transform:[`translate(-50%, ${fromY}px)`, 'translate(-50%, 0px)']},
+          {duration:.5, delay:base + .12, easing:EASE_ENTRY_EXP});
+      }
+    });
+  }
+
+  function rImageHero(slide, all){
+    const img = slide.querySelector('[data-anim="img"] img');
+    if(img){
+      animate(img, {opacity:[0,1], scale:[1.06, 1]}, {duration:1.1, delay:.05, easing:EASE_ENTRY_EXP});
+    }
+    const titleBlock = slide.querySelector('[data-anim="title-block"]');
+    if(titleBlock){
+      titleBlock.style.transformOrigin = 'left center';
+      animate(titleBlock, {opacity:[0,1], scaleX:[0, 1]}, {duration:.7, delay:.45, easing:EASE_ENTRY_EXP});
+      const titleText = titleBlock.querySelector('div');
+      if(titleText) animate(titleText, {opacity:[0,1]}, {duration:.4, delay:.85, easing:EASE_PROD});
+    }
+    const kpiWrap = slide.querySelector('[data-anim="kpi"]');
+    if(kpiWrap){
+      animate(kpiWrap, {opacity:[0,1]}, {duration:.3, delay:.7, easing:EASE_PROD});
+      const para = kpiWrap.querySelector(':scope > div:first-child');
+      if(para) animate(para, {opacity:[0,1], y:[14, 0]}, {duration:.6, delay:.85, easing:EASE_ENTRY_EXP});
+      const cols = [...kpiWrap.querySelectorAll(':scope > div:nth-child(2) > div')];
+      cols.forEach((col, i)=>{
+        const base = 1.1 + i*.18;
+        const topRule = col.querySelector(':scope > div:first-child');
+        if(topRule){
+          topRule.style.transformOrigin = 'left center';
+          animate(topRule, {scaleX:[0,1], opacity:[0,1]}, {duration:.5, delay:base, easing:EASE_ENTRY_EXP});
+        }
+      });
+    }
+  }
+
+  const RECIPES = {
+    'hero': rHero,
+    'progression': rProgression,
+    'statement': rStatement,
+    'grid-reveal': rGridReveal,
+    'stack-build': rStackBuild,
+    'bar-grow': rBarGrow,
+    'duo-mirror': rDuoMirror,
+    'split-statement': rSplitStatement,
+    'timeline-walk': rTimelineWalk,
+    'four-cards': rFourCards,
+    'tech-spec': rTechSpec,
+    'image-hero': rImageHero,
+  };
+
+  function playSlide(i){
+    const slide = slides[i];
+    if(!slide) return;
+    lastIdx = i;
+
+    if(window.__lowPowerMode){
+      slide.querySelectorAll('[data-anim]').forEach(el=>{
+        el.style.opacity='1';el.style.transform='none';
+      });
+      return;
+    }
+
+    resetAnims(slide);
+    slide.querySelectorAll('[data-anim]').forEach(el=>{
+      el.style.opacity = '1';
+      el.style.transform = 'none';
+    });
+
+    const all = [...slide.querySelectorAll('[data-anim]')];
+    const recipe = slide.dataset.animate;
+    const fn = RECIPES[recipe];
+    if(fn){ fn(slide, all); return; }
+
+    if(all.length) animate(all, {opacity:[0,1], y:[12,0]},
+      {duration:.6, delay:i=>i*.08, easing:EASE_ENTRY_EXP});
+  }
+
+  window.__playSlide = playSlide;
+  playSlide(window.__currentSlideIndex || 0);
+}
+</script>
+
+<script>
+(function(){
+  const canvases = [...document.querySelectorAll('canvas.ascii-bg')];
+  if(!canvases.length) return;
+
+  const PALETTE = '   ...:::---+++***◦◦••▢▣';
+  const CELL = 16;
+  const FONT_SIZE = 13;
+
+  function setup(c){
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = c.getBoundingClientRect();
+    if(rect.width < 4 || rect.height < 4) return false;
+    c.width = Math.round(rect.width * dpr);
+    c.height = Math.round(rect.height * dpr);
+    c.__dpr = dpr;
+    c.__w = rect.width;
+    c.__h = rect.height;
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    const mono = (getComputedStyle(document.documentElement).getPropertyValue('--mono') || 'JetBrains Mono, monospace').trim();
+    ctx.font = `500 ${FONT_SIZE}px ${mono}`;
+    ctx.textBaseline = 'top';
+    c.__ctx = ctx;
+    return true;
+  }
+
+  function draw(c, t){
+    if(!c.__ctx) return;
+    const ctx = c.__ctx, w = c.__w, h = c.__h;
+    ctx.clearRect(0, 0, w, h);
+    const cols = Math.ceil(w / CELL);
+    const rows = Math.ceil(h / CELL);
+    for(let r=0; r<rows; r++){
+      for(let cc=0; cc<cols; cc++){
+        const n = (
+          Math.sin(cc * 0.18 + t) +
+          Math.sin(r * 0.24 - t * 0.7) +
+          Math.sin((cc + r) * 0.12 + t * 0.45) +
+          Math.sin(Math.hypot(cc - cols * 0.5, r - rows * 0.5) * 0.16 - t * 0.55)
+        ) / 4;
+        const v = (n + 1) / 2;
+        if(v < 0.22) continue;
+        const idx = Math.min(PALETTE.length - 1, Math.floor(v * PALETTE.length));
+        const ch = PALETTE[idx];
+        if(ch === ' ') continue;
+        const alpha = 0.08 + (v - 0.22) * 0.55;
+        ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+        ctx.fillText(ch, cc * CELL, r * CELL);
+      }
+    }
+  }
+
+  function resizeAll(){ canvases.forEach(setup); }
+  let pending = null;
+  window.addEventListener('resize', ()=>{
+    if(window.__lowPowerMode) return;
+    if(pending) cancelAnimationFrame(pending);
+    pending = requestAnimationFrame(resizeAll);
+  }, {passive:true});
+
+  let t0 = performance.now();
+  let frame = 0, asciiRAF = 0, running = false;
+  function tick(now){
+    if(!running || window.__lowPowerMode){running=false;asciiRAF=0;return;}
+    const t = (now - t0) / 1000 * 0.55;
+    frame++;
+    canvases.forEach(c=>{
+      const slide = c.closest('.slide');
+      const rect = slide ? slide.getBoundingClientRect() : null;
+      const onscreen = rect && rect.right > 0 && rect.left < window.innerWidth;
+      if(!onscreen && (frame & 3) !== 0) return;
+      draw(c, t);
+    });
+    asciiRAF = requestAnimationFrame(tick);
+  }
+  function start(){
+    if(running || window.__lowPowerMode) return;
+    resizeAll();
+    t0 = performance.now();
+    frame = 0;
+    running = true;
+    asciiRAF = requestAnimationFrame(tick);
+  }
+  function stop(){
+    running = false;
+    if(asciiRAF) cancelAnimationFrame(asciiRAF);
+    asciiRAF = 0;
+    pending = null;
+    canvases.forEach(c=>{
+      if(c.__ctx) c.__ctx.clearRect(0,0,c.__w || 0,c.__h || 0);
+    });
+  }
+  addEventListener('swiss-low-power-change', e=>{e.detail.on ? stop() : start();});
+  start();
+})();
+</script>
+</body>
+</html>
