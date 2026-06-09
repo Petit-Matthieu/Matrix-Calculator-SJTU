@@ -1468,7 +1468,7 @@ const initialSlideParam = new URLSearchParams(location.search).get('slide');
 const initialSlide = initialSlideParam ? Number(initialSlideParam) - 1 : 0;
 go(Number.isFinite(initialSlide) ? initialSlide : 0);
 </script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="assets/lucide.min.js"></script>
 <script>lucide.createIcons();</script>
 
 <script type="module">
@@ -1477,7 +1477,7 @@ try {
   motion = await import('../assets/motion.min.js');
 } catch(e1) {
   try {
-    motion = await import('https://cdn.jsdelivr.net/npm/motion@11.11.17/+esm');
+    motion = await import('./assets/motion.esm.js');
   } catch(e2) {
     console.warn('[motion] local + CDN both failed, disabling animations', e1, e2);
     document.querySelectorAll('[data-anim]').forEach(el=>{el.style.opacity='1';el.style.transform='none'});
