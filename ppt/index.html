@@ -1472,17 +1472,7 @@ go(Number.isFinite(initialSlide) ? initialSlide : 0);
 <script>lucide.createIcons();</script>
 
 <script type="module">
-let motion;
-try {
-  motion = await import('./assets/motion.min.js');
-} catch(e1) {
-  try {
-    motion = await import('./assets/motion.esm.js');
-  } catch(e2) {
-    console.warn('[motion] local + CDN both failed, disabling animations', e1, e2);
-    document.querySelectorAll('[data-anim]').forEach(el=>{el.style.opacity='1';el.style.transform='none'});
-  }
-}
+import * as motion from './assets/motion.min.js';
 
 if(motion){
   const { animate } = motion;
